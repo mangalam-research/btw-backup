@@ -1,8 +1,10 @@
 from setuptools import setup, find_packages
 
+version = open('VERSION').read().strip()
+
 setup(
     name="btw-backup",
-    version="0.1.0",
+    version=version,
     packages=find_packages(),
     entry_points={
         'console_scripts': [
@@ -19,6 +21,9 @@ setup(
         'nose>=1.3.0',
         'pytimeparse>=1.1.4,<=2',
         'pyhash>=0.6.2,<1',
+    ],
+    data_files=[
+        ('.', ['LICENSE', 'VERSION'])
     ],
     # use_2to3=True,
     classifiers=[

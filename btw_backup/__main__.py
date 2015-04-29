@@ -18,6 +18,10 @@ from contextlib import closing
 import pytimeparse
 from pyhash import murmur3_32
 
+dirname = os.path.dirname(__file__)
+
+__version__ = open(os.path.join(dirname, '..', 'VERSION')).read().strip()
+
 fs_backup_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 prog = None
 base_working_dir = os.path.join(os.environ["HOME"], ".btw-backup")
@@ -480,25 +484,32 @@ class DBBackup(RdiffBackupCommand):
         # the *contents* of the saved databases are the same, the
         # dumps will differ. So we have to compare the dumps after
         # converting them to SQL.
+
+        dump_b = None
         dump_a = subprocess.Popen(["pg_restore", a], stdout=subprocess.PIPE)
         dump_b = subprocess.Popen(["pg_restore", b], stdout=subprocess.PIPE)
+        try:
+            pipe_a = dump_a.stdout
+            pipe_b = dump_b.stdout
 
-        pipe_a = dump_a.stdout
-        pipe_b = dump_b.stdout
+            bufsize = 64 * 1024
+            same = True
+            while same:
+                buf_a = pipe_a.read(bufsize)
+                buf_b = pipe_b.read(bufsize)
 
-        bufsize = 64 * 1024
-        same = True
-        while same:
-            buf_a = pipe_a.read(bufsize)
-            buf_b = pipe_b.read(bufsize)
+                len_b = len(buf_b)
+                if len(buf_a) == len_b and len_b == 0:
+                    break
 
-            len_b = len(buf_b)
-            if len(buf_a) == len_b and len_b == 0:
-                break
+                same = buf_a == buf_b
 
-            same = buf_a == buf_b
-
-        return same
+            return same
+        finally:
+            if dump_a is not None and dump_a.poll() is None:
+                dump_a.kill()
+            if dump_b is not None and dump_b.poll() is None:
+                dump_b.kill()
 
 uid_spec = {
     "args": ("-u", "--uid"),
@@ -526,6 +537,8 @@ def main():
     parser.add_argument("-q", "--quiet",
                         action="store_true",
                         help="makes the command run quietly")
+    parser.add_argument('--version', action='version',
+                        version='%(prog)s ' + __version__)
 
     fs_sp = subparsers.add_parser(
         "fs",

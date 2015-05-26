@@ -277,11 +277,11 @@ class FSTest(unittest.TestCase, BackupTestMixin):
              os.path.join(self.dst, last_date), restore_path])
 
         paths = os.listdir(restore_path)
-        self.assertEqual(paths, ["backup.tbz"])
+        self.assertEqual(paths, ["backup.tar"])
         t_path = os.path.join(restore_path, "t")
         os.mkdir(t_path)
-        subprocess.check_call(["tar", "-C", t_path, "-xjf",
-                               os.path.join(restore_path, "backup.tbz")])
+        subprocess.check_call(["tar", "-C", t_path, "-xf",
+                               os.path.join(restore_path, "backup.tar")])
 
         # Check the files.
         subprocess.check_call(["diff", "-rN", t_path, self.src])

@@ -18,6 +18,16 @@ from contextlib import closing
 import pytimeparse
 from pyhash import murmur3_32
 
+#
+# A note on compression. Compressing a tar file is problematic when
+# using rdiff-backup, as a single byte change in the source can have a
+# ripple effect on the whole tbz file. So we don't compress tar
+# files. Database dumps that are specific to a single database are
+# also not compressed, but for different reasons. A cluster-wide
+# database dump (with ``-g``) is compressed but the issue mentioned
+# above does not matter so much.
+#
+
 dirname = os.path.dirname(__file__)
 
 __version__ = open(os.path.join(dirname, '..', 'VERSION')).read().strip()
@@ -328,7 +338,7 @@ class FSBackup(SourceCommand, RdiffBackupCommand):
 
     @property
     def outfile_base(self):
-        return "backup.tbz"
+        return "backup.tar"
 
     def execute(self):
         src = self.src
@@ -342,7 +352,7 @@ class FSBackup(SourceCommand, RdiffBackupCommand):
             os.makedirs(backup_dir)
         outfile = self.outfile
         tar_args = ["-C", src, "--exclude-tag-under=NOBACKUP-TAG",
-                    "-cpjf", outfile, "."]
+                    "-cpf", outfile, "."]
 
         subprocess.check_call(["tar"] + tar_args)
         self.chownif(outfile)

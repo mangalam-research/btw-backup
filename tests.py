@@ -107,7 +107,7 @@ class BackupTestMixin(object):
         self.assertEqual(backup.exitcode, 0)
         return ret
 
-    def assertListOutput(self, backup, expected):
+    def assertRdiffListOutput(self, backup, expected):
         backup.join()
         outstr = backup.outstr
         self.assertEqual(backup.errstr, "")
@@ -144,6 +144,37 @@ class BackupTestMixin(object):
             len(lines), 0, "all lines should be accounted for\n" + outstr)
         return ret
 
+    def assertTarListOutput(self, backup, expected):
+        backup.join()
+        outstr = backup.outstr
+        self.assertEqual(backup.errstr, "")
+
+        lines = outstr.split("\n")
+        now = datetime.datetime.utcnow()
+        max_delta = datetime.timedelta(minutes=1)
+        parse = lambda x: datetime.datetime.strptime(
+            x, "%Y-%m-%dT%H:%M:%S.tbz")
+        prev_date = None
+        ret = []
+        for _ in range(0, expected):
+            line = lines.pop(0)
+            date = parse(line)
+            ret.append(date)
+            self.assertTrue(abs(now - date) <= max_delta,
+                            "the date should be relatively close to "
+                            "our current time")
+            if prev_date:
+                self.assertTrue(date > prev_date,
+                                "the dates should be in ascending order")
+
+            prev_date = date
+
+        self.assertEqual(backup.exitcode, 0)
+
+        self.assertEqual(
+            len(lines), 0, "all lines should be accounted for\n" + outstr)
+        return ret
+
     def assertError(self, backup, expected_error, expected_status):
         backup.join()
         self.assertEqual(backup.errstr, expected_error)
@@ -164,7 +195,7 @@ class BackupTestMixin(object):
             f.write("mod\n")
 
     def init(self, src, name="test"):
-        backup = Backup(["fs-init", src, name])
+        backup = Backup(["fs-init", "--type=rdiff", src, name])
         out = self.assertNoError(
             backup,
             ur"^btw-backup: created /tmp/.*?/test\..*?$",
@@ -172,7 +203,7 @@ class BackupTestMixin(object):
         return out.lstrip("btw-backup: created ")
 
     def list(self, expected):
-        self.assertListOutput(Backup(["list", self.dst]), expected)
+        self.assertRdiffListOutput(Backup(["list", self.dst]), expected)
 
 class FSInitTest(unittest.TestCase, BackupTestMixin):
 
@@ -182,25 +213,34 @@ class FSInitTest(unittest.TestCase, BackupTestMixin):
         empty_tmpdir()
 
     def test_lacking_all_params(self):
-        self.assertError(Backup(["fs-init"]),
-                         "usage: btw-backup fs-init [-h] src name\n"
-                         "btw-backup fs-init: error: too few arguments",
-                         2)
+        self.assertError(
+            Backup(["fs-init"]),
+            "usage: btw-backup fs-init [-h] --type {rdiff,tar} src name\n"
+            "btw-backup fs-init: error: too few arguments",
+            2)
 
     def test_lacking_name(self):
-        self.assertError(Backup(["fs-init", "."]),
-                         "usage: btw-backup fs-init [-h] src name\n"
-                         "btw-backup fs-init: error: too few arguments",
-                         2)
+        self.assertError(
+            Backup(["fs-init", "."]),
+            "usage: btw-backup fs-init [-h] --type {rdiff,tar} src name\n"
+            "btw-backup fs-init: error: too few arguments",
+            2)
+
+    def test_lacking_type(self):
+        self.assertError(
+            Backup(["fs-init", "/", "test"]),
+            "usage: btw-backup fs-init [-h] --type {rdiff,tar} src name\n"
+            "btw-backup fs-init: error: argument --type is required",
+            2)
 
     def test_not_absolute(self):
-        self.assertError(Backup(["fs-init", ".", "test"]),
+        self.assertError(Backup(["fs-init", "--type=rdiff", ".", "test"]),
                          "btw-backup: the source path must be absolute",
                          1)
 
     def test_new_setup(self):
         out = self.assertNoError(
-            Backup(["fs-init", self.src, "test"]),
+            Backup(["fs-init", "--type=rdiff", self.src, "test"]),
             ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
 
@@ -212,19 +252,19 @@ class FSInitTest(unittest.TestCase, BackupTestMixin):
 
     def test_duplicate_setup(self):
         out = self.assertNoError(
-            Backup(["fs-init", self.src, "test"]),
+            Backup(["fs-init", "--type=rdiff", self.src, "test"]),
             ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
         workdir_path = out.lstrip("btw-backup: created ")
 
         self.assertError(
-            Backup(["fs-init", self.src, "test2"]),
+            Backup(["fs-init", "--type=rdiff", self.src, "test2"]),
             "btw-backup: there is already a directory for this path",
             1)
 
         shutil.rmtree(workdir_path)
 
-class FSTest(unittest.TestCase, BackupTestMixin):
+class FSRdiffTest(unittest.TestCase, BackupTestMixin):
     src = os.path.join(os.getcwd(), "test-data/src")
 
     def setUp(self):
@@ -232,7 +272,7 @@ class FSTest(unittest.TestCase, BackupTestMixin):
         os.mkdir(self.dst)
 
         out = self.assertNoError(
-            Backup(["fs-init", self.src, "test"]),
+            Backup(["fs-init", "--type=rdiff", self.src, "test"]),
             ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
         self.workdir_path = out.lstrip("btw-backup: created ")
@@ -265,7 +305,7 @@ class FSTest(unittest.TestCase, BackupTestMixin):
     def test_new_backup(self):
         self.assertNoError(Backup(["fs", self.src, self.dst]))
 
-        backups = self.assertListOutput(
+        backups = self.assertRdiffListOutput(
             Backup(["list", self.dst]), "f")
 
         # Check that something was saved!
@@ -292,7 +332,7 @@ class FSTest(unittest.TestCase, BackupTestMixin):
         self.assertNoError(Backup(["fs", src, self.dst]))
         self.modify(src)
         self.assertNoError(Backup(["fs", src, self.dst]))
-        self.assertListOutput(Backup(["list", self.dst]), "fi")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "fi")
 
     def test_two_incremental_backups_no_change(self):
         src = self.createSrc()
@@ -303,7 +343,7 @@ class FSTest(unittest.TestCase, BackupTestMixin):
         self.assertNoError(Backup(["fs", src, self.dst]))
 
         # The second incremental backup did nothing.
-        self.assertListOutput(Backup(["list", self.dst]), "fi")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "fi")
 
     def test_max_incremental_count(self):
         src = self.createSrc()
@@ -317,12 +357,12 @@ class FSTest(unittest.TestCase, BackupTestMixin):
         self.modify(src)
         self.assertNoError(Backup(["fs", src, self.dst]))
 
-        self.assertListOutput(Backup(["list", self.dst]), "fi")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "fi")
 
         self.modify(src)
         self.assertNoError(Backup(["fs", src, self.dst]))
 
-        self.assertListOutput(Backup(["list", self.dst]), "fif")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "fif")
 
     def test_max_incremental_span(self):
         src = self.createSrc()
@@ -336,7 +376,7 @@ class FSTest(unittest.TestCase, BackupTestMixin):
         self.modify(src)
         self.assertNoError(Backup(["fs", src, self.dst]))
 
-        self.assertListOutput(Backup(["list", self.dst]), "ff")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "ff")
 
     def test_identical_full_backup(self):
         src = self.createSrc()
@@ -349,7 +389,7 @@ class FSTest(unittest.TestCase, BackupTestMixin):
         self.assertNoError(Backup(["fs", src, self.dst]))
 
         # Only one backup.
-        self.assertListOutput(Backup(["list", self.dst]), "f")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "f")
 
         # Check the log
         self.assertRegexpMatches(
@@ -357,6 +397,83 @@ class FSTest(unittest.TestCase, BackupTestMixin):
             ur"^.*: no change in the data to be backed up: "
             "skipping creation of new full backup\n$")
 
+
+class FSTarTest(unittest.TestCase, BackupTestMixin):
+    src = os.path.join(os.getcwd(), "test-data/src")
+
+    def setUp(self):
+        self.dst = os.path.join(tmpdir, "dst")
+        os.mkdir(self.dst)
+
+        out = self.assertNoError(
+            Backup(["fs-init", "--type=tar", self.src, "test"]),
+            ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
+            regexp=True)
+        self.workdir_path = out.lstrip("btw-backup: created ")
+
+    def tearDown(self):
+        empty_tmpdir()
+
+    def init(self, src, name="test"):
+        backup = Backup(["fs-init", "--type=tar", src, name])
+        out = self.assertNoError(
+            backup,
+            ur"^btw-backup: created /tmp/.*?/test\..*?$",
+            regexp=True)
+        return out.lstrip("btw-backup: created ")
+
+    def test_no_setup(self):
+        empty_tmpdir()
+        self.assertError(
+            Backup(["fs", self.src, self.dst]),
+            "btw-backup: no working directory for: "
+            "/home/ldd/src/git-repos/btw-backup/test-data/src",
+            1)
+
+    def test_no_params(self):
+        self.assertError(
+            Backup(["fs"]),
+            "usage: btw-backup fs [-h] [-u UID[:GID]] src dst\n"
+            "btw-backup fs: error: too few arguments",
+            2)
+
+    def test_no_dst(self):
+        self.assertError(
+            Backup(["fs", self.src]),
+            "usage: btw-backup fs [-h] [-u UID[:GID]] src dst\n"
+            "btw-backup fs: error: too few arguments",
+            2)
+
+    def test_new_backup(self):
+        self.assertNoError(Backup(["fs", self.src, self.dst]))
+
+        backups = self.assertTarListOutput(
+            Backup(["list", self.dst]), 1)
+
+        # Check that something was saved!
+        restore_path = tempfile.mkdtemp(dir=tmpdir)
+        last_date = backups[-1].isoformat()
+        subprocess.check_call(["tar", "-C", restore_path, "-xf",
+                               os.path.join(self.dst, last_date + ".tbz")])
+
+        # Check the files.
+        subprocess.check_call(["diff", "-rN", restore_path, self.src])
+
+    def test_identical_backup(self):
+        src = self.createSrc()
+        workdir_path = self.init(src)
+
+        self.assertNoError(Backup(["fs", src, self.dst]))
+        self.assertNoError(Backup(["fs", src, self.dst]))
+
+        # Only one backup.
+        self.assertTarListOutput(Backup(["list", self.dst]), 1)
+
+        # Check the log
+        self.assertRegexpMatches(
+            open(os.path.join(self.dst, "log.txt"), 'r').read(),
+            ur"^.*: no change in the data to be backed up: "
+            "dropping backup\n$")
 
 class ListTest(unittest.TestCase, BackupTestMixin):
 
@@ -375,7 +492,7 @@ class ListTest(unittest.TestCase, BackupTestMixin):
     def test_one_full_backup(self):
         self.init(self.src)
         self.assertNoError(Backup(["fs", self.src, self.dst]))
-        self.assertListOutput(Backup(["list", self.dst]), "f")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "f")
 
     def test_one_full_backup_one_incremental(self):
         src = self.createSrc()
@@ -385,7 +502,7 @@ class ListTest(unittest.TestCase, BackupTestMixin):
         self.modify(src)
         self.assertNoError(Backup(["fs", src, self.dst]))
 
-        self.assertListOutput(Backup(["list", self.dst]), "fi")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "fi")
 
     def test_one_full_backup_two_incremental(self):
         src = self.createSrc()
@@ -398,7 +515,7 @@ class ListTest(unittest.TestCase, BackupTestMixin):
         self.modify(src)
         self.assertNoError(Backup(["fs", src, self.dst]))
 
-        self.assertListOutput(Backup(["list", self.dst]), "fii")
+        self.assertRdiffListOutput(Backup(["list", self.dst]), "fii")
 
 @contextlib.contextmanager
 def fake_dumpall_cmd(new):
@@ -606,7 +723,7 @@ class DBTest(unittest.TestCase, CommonDB):
         self.assertNoError(Backup(["db"] + args + [self.db_name, self.dst]))
 
     def list(self, expected):
-        self.assertListOutput(Backup(["list", self.dst]), expected)
+        self.assertRdiffListOutput(Backup(["list", self.dst]), expected)
 
     def test_bad_db_name(self):
         self.assertError(Backup(["db", "@GARBAGE@", self.dst]),

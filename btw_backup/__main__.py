@@ -153,6 +153,7 @@ class FSBackupInit(SourceCommand):
 
     def execute(self):
         src = self.src
+        backup_type = self.args.backup_type
         name = self.args.name
 
         if not os.path.isabs(src):
@@ -174,23 +175,58 @@ class FSBackupInit(SourceCommand):
 
         config_path = os.path.join(working_dir, "config.py")
         with open(config_path, "w") as f:
-            f.write("""\
+            if backup_type == "rdiff":
+                f.write("""\
+TYPE="rdiff"
 MAX_INCREMENTAL_COUNT=10
 MAX_INCREMENTAL_SPAN="24h"
 """)
+            elif backup_type == "tar":
+                f.write("""\
+TYPE="tar"
+""")
+            else:
+                fatal("unknown backup type: " + backup_type)
 
         info("created " + working_dir)
         return 0
 
-class RdiffBackupCommand(Command):
+class BaseBackupCommand(Command):
 
     def __init__(self, args):
-        super(RdiffBackupCommand, self).__init__(args)
-        self._outfile = None
+        super(BaseBackupCommand, self).__init__(args)
 
     @property
     def config(self):
         raise NotImplementedError
+
+    def execute_backup(self):
+        raise NotImplementedError
+
+    def chownif(self, path):
+        if self.args.uid:
+            self.chown(path)
+
+    def chown(self, path):
+        os.chown(path, self.args.uid, self.args.gid)
+
+    def compare(self, a, b):
+        """
+        :returns: ``True`` if the files are the same, ``False`` if not.
+        """
+        return filecmp.cmp(a, b, shallow=False)
+
+    def log(self, msg):
+        log_path = os.path.join(self.args.dst, "log.txt")
+        with open(log_path, "a") as f:
+            f.write(msg + "\n")
+        self.chownif(log_path)
+
+class RdiffBackupCommand(BaseBackupCommand):
+
+    def __init__(self, args):
+        super(RdiffBackupCommand, self).__init__(args)
+        self._outfile = None
 
     @property
     def backup_dir(self):
@@ -208,13 +244,6 @@ class RdiffBackupCommand(Command):
     @property
     def outfile_base(self):
         raise NotImplementedError
-
-    def chownif(self, path):
-        if self.args.uid:
-            self.chown(path)
-
-    def chown(self, path):
-        os.chown(path, self.args.uid, self.args.gid)
 
     def rdiff_backup(self, src, dst):
         subprocess.check_call(["rdiff-backup", src, dst])
@@ -319,26 +348,67 @@ class RdiffBackupCommand(Command):
 
                 self.rdiff_backup(backup_dir, new_dir_path)
 
-    def compare(self, a, b):
-        """
-        :returns: ``True`` if the files are the same, ``False`` if not.
-        """
-        return filecmp.cmp(a, b, shallow=False)
 
-    def log(self, msg):
-        with open(os.path.join(self.args.dst, "log.txt"), "a") as f:
-            f.write(msg + "\n")
+class TarBackupCommand(SourceCommand, BaseBackupCommand):
 
+    def __init__(self, args):
+        super(TarBackupCommand, self).__init__(args)
 
-class FSBackup(SourceCommand, RdiffBackupCommand):
+    def execute(self):
+        src = self.src
 
-    """
-    Backs up a filesystem hierarchy.
-    """
+        working_dir = self.working_dir
+        if working_dir is None:
+            fatal("no working directory for: " + src)
 
-    @property
-    def outfile_base(self):
-        return "backup.tar"
+        backup_dir = self.backup_dir
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+
+        self.execute_backup()
+        return 0
+
+    def execute_backup(self):
+        src = self.args.src
+        dst = self.args.dst
+
+        files = sorted(x for x in os.listdir(dst) if fs_backup_re.match(x))
+
+        last = files[-1] if files else None
+        last_path = os.path.join(dst, last) if last else None
+
+        #
+        # We do this so that we don't start two backups in the same
+        # second. It would indeed be a bizarre use of this software to
+        # start two backups in the same second but we should check for
+        # this eventuality anyway.
+        #
+        # We also check the last incremental. There's no hard reason
+        # to prevent the next full backup from being on the same
+        # second as the last incremental but it does simplify testing
+        # a little bit and is consistent with the rest of the
+        # software.
+        #
+        while True:
+            now = datetime.datetime.utcnow().replace(microsecond=0)
+            new_backup_name = now.isoformat() + ".tbz"
+            if last is None or new_backup_name != last:
+                break
+            time.sleep(0.5)
+
+        new_backup_path = os.path.join(dst, new_backup_name)
+        tar_args = ["-C", src, "--exclude-tag-under=NOBACKUP-TAG",
+                    "-cpjf", new_backup_path, "."]
+        subprocess.check_call(["tar"] + tar_args)
+
+        if last_path is not None and \
+           self.compare(new_backup_path, last_path):
+            self.log(new_backup_name +
+                     ": no change in the data to be backed up: "
+                     "dropping backup")
+            os.unlink(new_backup_path)
+
+class SourceRdiffBackupCommand(SourceCommand, RdiffBackupCommand):
 
     def execute(self):
         src = self.src
@@ -358,6 +428,33 @@ class FSBackup(SourceCommand, RdiffBackupCommand):
         self.chownif(outfile)
 
         self.execute_backup()
+        return 0
+
+    @property
+    def outfile_base(self):
+        return "backup.tar"
+
+class FSBackup(SourceCommand):
+
+    """
+    Backs up a filesystem hierarchy.
+    """
+
+    def execute(self):
+        src = self.args.src
+
+        working_dir = self.working_dir
+        if working_dir is None:
+            fatal("no working directory for: " + src)
+
+        config = self.config
+        backup_type = config.get("TYPE")
+        if backup_type == "rdiff":
+            return SourceRdiffBackupCommand(self.args).execute()
+        elif backup_type == "tar":
+            return TarBackupCommand(self.args).execute()
+
+        fatal("unknown backup type: " + backup_type)
         return 0
 
 
@@ -392,10 +489,11 @@ class List(Command):
 
         files = sorted(x for x in os.listdir(dst) if fs_backup_re.match(x))
         for f in files:
-            fullpath = os.path.join(dst, f)
             echo(f)
-            for incremental in get_incrementals_for(fullpath):
-                echo(" " + incremental)
+            if not f.endswith(".tbz"):
+                fullpath = os.path.join(dst, f)
+                for incremental in get_incrementals_for(fullpath):
+                    echo(" " + incremental)
 
         return 0
 
@@ -568,6 +666,11 @@ def main():
         help="initializes the working directory for backups",
         formatter_class=argparse.RawTextHelpFormatter)
     fs_init_sp.set_defaults(class_=FSBackupInit)
+    fs_init_sp.add_argument("--type",
+                            help="the type of backup",
+                            choices=("rdiff", "tar"),
+                            required=True,
+                            dest="backup_type")
     fs_init_sp.add_argument("src",
                             help="the source to backup")
     fs_init_sp.add_argument(

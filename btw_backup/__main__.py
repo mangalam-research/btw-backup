@@ -400,6 +400,7 @@ class TarBackupCommand(SourceCommand, BaseBackupCommand):
         tar_args = ["-C", src, "--exclude-tag-under=NOBACKUP-TAG",
                     "-cpjf", new_backup_path, "."]
         subprocess.check_call(["tar"] + tar_args)
+        self.chownif(new_backup_path)
 
         if last_path is not None and \
            self.compare(new_backup_path, last_path):

@@ -78,14 +78,27 @@ def get_src_path(working_dir):
 class Command(object):
 
     def __init__(self, args):
+        """
+        A command on the command line. This backup software takes a
+        command as its first argument.
+        """
         self.args = args
 
     def execute(self):
+        "Executes the command"
         pass
 
 class SourceCommand(Command):
 
     def __init__(self, args):
+        """
+        A command that takes an ``src`` argument on the command
+        line. Besides need a ``src`` argument, these commands depend
+        on a "working directory" in which they find configuration
+        options and create files while they perform their work.
+
+        :param args: The arguments passed on the command line.
+        """
         super(SourceCommand, self).__init__(args)
         self.src = args.src
         self._working_dir = None
@@ -94,6 +107,9 @@ class SourceCommand(Command):
 
     @property
     def working_dir(self):
+        """
+        The working directory for this command.
+        """
         if self._working_dir is not None:
             return self._working_dir
 
@@ -126,6 +142,11 @@ class SourceCommand(Command):
 
     @property
     def config(self):
+        """
+        The configuration for this command. The configuration is stored in
+        a ``config.py`` file located under the working directory. This
+        property is the *configuration itself*, not the file name.
+        """
         if self._config is not None:
             return self._config
 
@@ -138,6 +159,11 @@ class SourceCommand(Command):
 
     @property
     def backup_dir(self):
+        """
+        The backup directory is a directory under the working directory
+        named "backup", that this command may use for creating a new
+        backup, before moving it to its final location.
+        """
         if self._backup_dir is not None:
             return self._backup_dir
 
@@ -194,20 +220,38 @@ TYPE="tar"
 class BaseBackupCommand(Command):
 
     def __init__(self, args):
+        """
+        A mixin or base class for all backup commands.
+        """
         super(BaseBackupCommand, self).__init__(args)
 
     @property
     def config(self):
+        """
+        Not implemented here.
+        """
         raise NotImplementedError
 
     def execute_backup(self):
+        """
+        This is the method that actually performs the backup itself. It
+        must be implemented by derived classes.
+        """
         raise NotImplementedError
 
     def chownif(self, path):
+        """
+        Change ownership of a file only if the command-line arguments
+        requested it.
+        """
         if self.args.uid:
             self.chown(path)
 
     def chown(self, path):
+        """
+        Change ownership of a file on the basis of the command-line arguments
+        passed.
+        """
         os.chown(path, self.args.uid, self.args.gid)
 
     def compare(self, a, b):
@@ -217,6 +261,15 @@ class BaseBackupCommand(Command):
         return filecmp.cmp(a, b, shallow=False)
 
     def log(self, msg):
+        """
+        Stores a message into the log file. A newline is automatically
+        added to the message. This supposes that there is a ``dst``
+        directory specified on the command line. This method creates
+        the file if it does not yet exist and sets ownership according
+        to the command-line arguments.
+
+        :params msg: The message to store in the log file.
+        """
         log_path = os.path.join(self.args.dst, "log.txt")
         with open(log_path, "a") as f:
             f.write(msg + "\n")
@@ -225,15 +278,28 @@ class BaseBackupCommand(Command):
 class RdiffBackupCommand(BaseBackupCommand):
 
     def __init__(self, args):
+        """
+        A backup command that uses ``rdiff-backup`` to perform the backup.
+
+        :param args: The command-line arguments.
+        """
         super(RdiffBackupCommand, self).__init__(args)
         self._outfile = None
 
     @property
     def backup_dir(self):
+        """
+        This class does not know anything about the backup_dir so does not
+        implement the property.
+        """
         raise NotImplementedError
 
     @property
     def outfile(self):
+        """
+        The complete path of the file into which to store the backup
+        operation.
+        """
         if self._outfile is not None:
             return self._outfile
 
@@ -243,10 +309,23 @@ class RdiffBackupCommand(BaseBackupCommand):
 
     @property
     def outfile_base(self):
+        """
+        The basename of ``outfile`` derived classes must override this
+        property to provide an actual name.
+        """
         raise NotImplementedError
 
     def rdiff_backup(self, src, dst):
+        """
+        Executes ``rdiff-backup``. This method will also change ownership
+        of the created files.
+
+        :param src: The source path to backup.
+        :param dst: The destination to backup to.
+        """
         subprocess.check_call(["rdiff-backup", src, dst])
+        # We perform the test with self.args.uid here and just call
+        # self.chown instead of calling self.chownif repeatedly.
         if self.args.uid:
             self.chown(dst)
             for (root, dirnames, filenames) in os.walk(dst):
@@ -352,6 +431,11 @@ class RdiffBackupCommand(BaseBackupCommand):
 class TarBackupCommand(SourceCommand, BaseBackupCommand):
 
     def __init__(self, args):
+        """
+        A command that backs up using ``tar``.
+
+        :param args: The command-line arguments.
+        """
         super(TarBackupCommand, self).__init__(args)
 
     def execute(self):
@@ -410,6 +494,10 @@ class TarBackupCommand(SourceCommand, BaseBackupCommand):
             os.unlink(new_backup_path)
 
 class SourceRdiffBackupCommand(SourceCommand, RdiffBackupCommand):
+    """
+    A backup command using ``rdiff-backup`` to perform the backups,
+    and which depends on a ``src`` argument on the command line.
+    """
 
     def execute(self):
         src = self.src
@@ -460,6 +548,17 @@ class FSBackup(SourceCommand):
 
 
 def get_incrementals_for(fullpath, include_full=False):
+    """
+    Get the list of incremental backups stored by ``rdiff-backup`` at
+    a specific path.
+
+    :param fullpath: The path.
+
+    :param include_full: Include the full backup in the
+    listing. Defaults to ``False``.
+
+    :returns: The list of backups.
+    """
     out = subprocess.check_output(
         ["rdiff-backup", "-l", "--parsable-output", fullpath])
     incrementals = out.split("\n")
@@ -522,6 +621,11 @@ class DBBackup(RdiffBackupCommand):
 
     @property
     def config(self):
+        """
+        The configuration for this command. It is stored in a file named
+        "global.py" or "<db>.py" under the base working directory of
+        this software.
+        """
         if self._config is not None:
             return self._config
 
@@ -544,6 +648,9 @@ class DBBackup(RdiffBackupCommand):
 
     @property
     def backup_dir(self):
+        """
+        A temporary directory where to store the backup.
+        """
         if self._backup_dir is not None:
             return self._backup_dir
 

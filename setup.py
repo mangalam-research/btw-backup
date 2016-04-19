@@ -18,7 +18,6 @@ setup(
     keywords=["backup"],
     url="https://github.com/mangalam-research/btw-backup",
     install_requires=[
-        'nose>=1.3.0',
         'pytimeparse>=1.1.4,<=2',
         'pyhash>=0.6.2,<1',
     ],
@@ -26,6 +25,7 @@ setup(
         'psycopg2>=2.5.2,<3'
     ],
     test_suite= 'nose.collector',
+    setup_requires=['nose>=1.3.0'],
     data_files=[
         ('.', ['LICENSE', 'VERSION'])
     ],

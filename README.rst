@@ -8,11 +8,14 @@ Synopsis
 
 ::
 
-    btw-backup [-h] [-q] [--version] {fs,fs-init,list,db} ...
+    btw_backup [-h] [-q] [--config-dir CONFIG_DIR] [--version]
+                        {fs,fs-init,list,db} ...
 
     optional arguments:
       -h, --help            show this help message and exit
       -q, --quiet           makes the command run quietly
+      --config-dir CONFIG_DIR
+                            sets the general configuration directory
       --version             show program's version number and exit
 
     subcommands:
@@ -26,7 +29,8 @@ Configuration
 =============
 
 The files used by ``btw-backup`` at run-time are expected to be in
-``~/.btw-backup/``. This directory may contain the following files:
+``~/.btw-backup/``, except if you use ``--config-dir`` to override
+it. This directory may contain the following files:
 
 * ``global.py`` a configuration file for backups of database globals,
 

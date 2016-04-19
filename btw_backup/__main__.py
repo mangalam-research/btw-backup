@@ -34,7 +34,6 @@ __version__ = open(os.path.join(dirname, '..', 'VERSION')).read().strip()
 
 fs_backup_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 prog = None
-base_working_dir = os.path.join(os.environ["HOME"], ".btw-backup")
 dumpall_cmd = ["pg_dumpall", "-g"]
 
 os.umask(0077)
@@ -116,7 +115,7 @@ class SourceCommand(Command):
         h = get_hash(self.src)
 
         try:
-            working_dirs = os.listdir(base_working_dir)
+            working_dirs = os.listdir(self.args.config_dir)
         except OSError:
             working_dirs = []
 
@@ -128,7 +127,7 @@ class SourceCommand(Command):
         if not candidates:
             return None
 
-        candidate = os.path.join(base_working_dir, candidates[0])
+        candidate = os.path.join(self.args.config_dir, candidates[0])
 
         src_file = get_src_path(candidate)
         link = os.readlink(src_file)
@@ -190,7 +189,7 @@ class FSBackupInit(SourceCommand):
             fatal("there is already a directory for this path")
 
         h = get_hash(src)
-        working_dir = os.path.join(base_working_dir, name + "." + h)
+        working_dir = os.path.join(self.args.config_dir, name + "." + h)
         src_file = get_src_path(working_dir)
         os.makedirs(working_dir)
         try:
@@ -634,7 +633,7 @@ class DBBackup(RdiffBackupCommand):
         else:
             config_name = self.args.db + ".py"
 
-        config_path = os.path.join(base_working_dir, "db", config_name)
+        config_path = os.path.join(self.args.config_dir, "db", config_name)
 
         conf = {
             "MAX_INCREMENTAL_COUNT": 10,
@@ -664,8 +663,10 @@ class DBBackup(RdiffBackupCommand):
     def execute(self):
         outfile = self.outfile
         if self.args.g:
-            dump = subprocess.Popen(dumpall_cmd,
-                                    stdout=subprocess.PIPE)
+            fake = self.args.fake_dumpall
+            args = fake.split() if fake else dumpall_cmd
+
+            dump = subprocess.Popen(args, stdout=subprocess.PIPE)
 
             with closing(dump.stdout), \
                     closing(bz2.BZ2File(outfile, 'wb')) as bz2file:
@@ -747,12 +748,16 @@ def main():
 
     prog = sys.argv[0]
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog=prog)
     subparsers = parser.add_subparsers(title="subcommands")
 
     parser.add_argument("-q", "--quiet",
                         action="store_true",
                         help="makes the command run quietly")
+    parser.add_argument("--config-dir",
+                        action="store",
+                        help="sets the general configuration directory",
+                        default=os.path.join(os.environ["HOME"], ".btw-backup"))
     parser.add_argument('--version', action='version',
                         version='%(prog)s ' + __version__)
 
@@ -811,6 +816,10 @@ def main():
     db_sp.add_argument("dst",
                        help="the final destination directory where to "
                        "put the backup")
+
+    # This is used only for testing.
+    db_sp.add_argument('--fake-dumpall', action='store',
+                       help=argparse.SUPPRESS)
 
     try:
         args = parser.parse_args()

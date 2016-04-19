@@ -1,12 +1,9 @@
 import unittest
 import os
-import sys
-import multiprocessing
 import tempfile
 import shutil
 import datetime
 import subprocess
-import contextlib
 import psycopg2
 import bz2
 import pwd
@@ -15,39 +12,16 @@ import grp
 import btw_backup.__main__ as main
 
 
-def btw_backup_func(args, stdin, stdout, stderr):
-    sys.stdin = os.fdopen(stdin, 'r')
-    sys.stdout = os.fdopen(stdout, 'w')
-    sys.stderr = os.fdopen(stderr, 'w')
-    sys.argv = args
-    try:
-        ret = main.main()
-    finally:
-        sys.stdin.flush()
-        sys.stdout.flush()
-        sys.stderr.flush()
-    sys.exit(ret)
-
-
 class Backup(object):
 
     def __init__(self, args):
-        args[0:0] = ["btw-backup"]
+        args[0:0] = ["python", "-m", "btw_backup", "--config-dir=" + config_dir]
         self.args = args
-        (stdin_r, stdin_w) = os.pipe()
-        (stdout_r, stdout_w) = os.pipe()
-        (stderr_r, stderr_w) = os.pipe()
-        ret = multiprocessing.Process(
-            target=btw_backup_func,
-            args=[args, stdin_r, stdout_w, stderr_w])
-        ret.start()
-        os.close(stdin_r)
-        os.close(stdout_w)
-        os.close(stderr_w)
-        self.proc = ret
-        self.stdin = os.fdopen(stdin_w, 'w')
-        self.stdout = os.fdopen(stdout_r, 'r')
-        self.stderr = os.fdopen(stderr_r, 'r')
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        self.proc = proc
+        self.stdout = proc.stdout
+        self.stderr = proc.stderr
 
     @property
     def outstr(self):
@@ -59,23 +33,22 @@ class Backup(object):
 
     @property
     def exitcode(self):
-        return self.proc.exitcode
+        return self.proc.returncode
 
     def join(self):
-        return self.proc.join()
+        return self.proc.wait()
 
 tmpdir = None
-workdir = None
+config_dir = None
 
 preserve = os.environ.get("NOCLEANUP")
 
 def setUp():
     # pylint: disable=global-statement
     global tmpdir
-    global workdir
+    global config_dir
     tmpdir = tempfile.mkdtemp()
-    workdir = os.path.join(tmpdir, "workdir")
-    main.base_working_dir = workdir
+    config_dir = os.path.join(tmpdir, "config_dir")
 
 def tearDown():
     if tmpdir:
@@ -198,9 +171,9 @@ class BackupTestMixin(object):
         backup = Backup(["fs-init", "--type=rdiff", src, name])
         out = self.assertNoError(
             backup,
-            ur"^btw-backup: created /tmp/.*?/test\..*?$",
+            ur"^btw_backup: created /tmp/.*?/test\..*?$",
             regexp=True)
-        return out.lstrip("btw-backup: created ")
+        return out[len("btw_backup: created "):]
 
     def list(self, expected):
         self.assertRdiffListOutput(Backup(["list", self.dst]), expected)
@@ -215,36 +188,36 @@ class FSInitTest(unittest.TestCase, BackupTestMixin):
     def test_lacking_all_params(self):
         self.assertError(
             Backup(["fs-init"]),
-            "usage: btw-backup fs-init [-h] --type {rdiff,tar} src name\n"
-            "btw-backup fs-init: error: too few arguments",
+            "usage: btw_backup fs-init [-h] --type {rdiff,tar} src name\n"
+            "btw_backup fs-init: error: too few arguments",
             2)
 
     def test_lacking_name(self):
         self.assertError(
             Backup(["fs-init", "."]),
-            "usage: btw-backup fs-init [-h] --type {rdiff,tar} src name\n"
-            "btw-backup fs-init: error: too few arguments",
+            "usage: btw_backup fs-init [-h] --type {rdiff,tar} src name\n"
+            "btw_backup fs-init: error: too few arguments",
             2)
 
     def test_lacking_type(self):
         self.assertError(
             Backup(["fs-init", "/", "test"]),
-            "usage: btw-backup fs-init [-h] --type {rdiff,tar} src name\n"
-            "btw-backup fs-init: error: argument --type is required",
+            "usage: btw_backup fs-init [-h] --type {rdiff,tar} src name\n"
+            "btw_backup fs-init: error: argument --type is required",
             2)
 
     def test_not_absolute(self):
         self.assertError(Backup(["fs-init", "--type=rdiff", ".", "test"]),
-                         "btw-backup: the source path must be absolute",
+                         "btw_backup: the source path must be absolute",
                          1)
 
     def test_new_setup(self):
         out = self.assertNoError(
             Backup(["fs-init", "--type=rdiff", self.src, "test"]),
-            ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
+            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
 
-        workdir_path = out.lstrip("btw-backup: created ")
+        workdir_path = out[len("btw_backup: created "):]
         src = os.readlink(os.path.join(workdir_path, "src"))
         self.assertEqual(src, self.src)
 
@@ -253,13 +226,13 @@ class FSInitTest(unittest.TestCase, BackupTestMixin):
     def test_duplicate_setup(self):
         out = self.assertNoError(
             Backup(["fs-init", "--type=rdiff", self.src, "test"]),
-            ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
+            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
-        workdir_path = out.lstrip("btw-backup: created ")
+        workdir_path = out[len("btw_backup: created "):]
 
         self.assertError(
             Backup(["fs-init", "--type=rdiff", self.src, "test2"]),
-            "btw-backup: there is already a directory for this path",
+            "btw_backup: there is already a directory for this path",
             1)
 
         shutil.rmtree(workdir_path)
@@ -273,9 +246,9 @@ class FSRdiffTest(unittest.TestCase, BackupTestMixin):
 
         out = self.assertNoError(
             Backup(["fs-init", "--type=rdiff", self.src, "test"]),
-            ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
+            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
-        self.workdir_path = out.lstrip("btw-backup: created ")
+        self.workdir_path = out[len("btw_backup: created "):]
 
     def tearDown(self):
         empty_tmpdir()
@@ -284,22 +257,22 @@ class FSRdiffTest(unittest.TestCase, BackupTestMixin):
         empty_tmpdir()
         self.assertError(
             Backup(["fs", self.src, self.dst]),
-            "btw-backup: no working directory for: "
+            "btw_backup: no working directory for: "
             "/home/ldd/src/git-repos/btw-backup/test-data/src",
             1)
 
     def test_no_params(self):
         self.assertError(
             Backup(["fs"]),
-            "usage: btw-backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw-backup fs: error: too few arguments",
+            "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
+            "btw_backup fs: error: too few arguments",
             2)
 
     def test_no_dst(self):
         self.assertError(
             Backup(["fs", self.src]),
-            "usage: btw-backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw-backup fs: error: too few arguments",
+            "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
+            "btw_backup fs: error: too few arguments",
             2)
 
     def test_new_backup(self):
@@ -407,9 +380,9 @@ class FSTarTest(unittest.TestCase, BackupTestMixin):
 
         out = self.assertNoError(
             Backup(["fs-init", "--type=tar", self.src, "test"]),
-            ur"^btw-backup: created /tmp/.*?/test.uqsE0Q",
+            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
-        self.workdir_path = out.lstrip("btw-backup: created ")
+        self.workdir_path = out[len("btw_backup: created "):]
 
     def tearDown(self):
         empty_tmpdir()
@@ -418,30 +391,30 @@ class FSTarTest(unittest.TestCase, BackupTestMixin):
         backup = Backup(["fs-init", "--type=tar", src, name])
         out = self.assertNoError(
             backup,
-            ur"^btw-backup: created /tmp/.*?/test\..*?$",
+            ur"^btw_backup: created /tmp/.*?/test\..*?$",
             regexp=True)
-        return out.lstrip("btw-backup: created ")
+        return out[len("btw_backup: created "):]
 
     def test_no_setup(self):
         empty_tmpdir()
         self.assertError(
             Backup(["fs", self.src, self.dst]),
-            "btw-backup: no working directory for: "
+            "btw_backup: no working directory for: "
             "/home/ldd/src/git-repos/btw-backup/test-data/src",
             1)
 
     def test_no_params(self):
         self.assertError(
             Backup(["fs"]),
-            "usage: btw-backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw-backup fs: error: too few arguments",
+            "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
+            "btw_backup fs: error: too few arguments",
             2)
 
     def test_no_dst(self):
         self.assertError(
             Backup(["fs", self.src]),
-            "usage: btw-backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw-backup fs: error: too few arguments",
+            "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
+            "btw_backup fs: error: too few arguments",
             2)
 
     def test_new_backup(self):
@@ -516,13 +489,6 @@ class ListTest(unittest.TestCase, BackupTestMixin):
         self.assertNoError(Backup(["fs", src, self.dst]))
 
         self.assertRdiffListOutput(Backup(["list", self.dst]), "fii")
-
-@contextlib.contextmanager
-def fake_dumpall_cmd(new):
-    old = main.dumpall_cmd
-    main.dumpall_cmd = new
-    yield
-    main.dumpall_cmd = old
 
 class CommonDB(BackupTestMixin):
 
@@ -625,26 +591,30 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
     def setUp(self):
         self.dst = os.path.join(tmpdir, "dst")
         os.mkdir(self.dst)
-        self.db_config_dir = os.path.join(workdir, "db")
+        self.db_config_dir = os.path.join(config_dir, "db")
         self.config_path = os.path.join(self.db_config_dir, "global.py")
         os.makedirs(self.db_config_dir)
-        self.old_dumpall_cmd = main.dumpall_cmd
-        self.alter_db()
+        self.dumpall_cmd = None
         self.previous_contents = None
+        self.alter_db()
 
     def tearDown(self):
-        main.dumpall_cmd = self.old_dumpall_cmd
         if not preserve:
             empty_tmpdir()
 
     def backup(self, args=None):
         if args is None:
             args = []
-        self.assertNoError(Backup(["db", "-g"] + args + [self.dst]))
+        self.assertNoError(Backup(["db", "-g"] +
+                                  ([] if self.dumpall_cmd is None else
+                                   ["--fake-dumpall",
+                                    " ".join(self.dumpall_cmd)]) +
+                                  args +
+                                  [self.dst]))
 
     def alter_db(self):
         self.previous_contents = "foo" + str(self.__class__.count)
-        main.dumpall_cmd = ["echo", self.previous_contents]
+        self.dumpall_cmd = ["echo", self.previous_contents]
         # echo adds a newline.
         self.previous_contents += "\n"
         self.__class__.count += 1
@@ -652,14 +622,14 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
     def test_no_params(self):
         self.assertError(
             Backup(["db"]),
-            "usage: btw-backup db [-h] [-g] [-u UID[:GID]] [db] dst\n"
-            "btw-backup db: error: too few arguments",
+            "usage: btw_backup db [-h] [-g] [-u UID[:GID]] [db] dst\n"
+            "btw_backup db: error: too few arguments",
             2)
 
     def test_no_database(self):
         self.assertError(
             Backup(["db", self.dst]),
-            "btw-backup: either -g (--global) or a database name "
+            "btw_backup: either -g (--global) or a database name "
             "must be specified",
             1)
 
@@ -702,7 +672,7 @@ class DBTest(unittest.TestCase, CommonDB):
     def setUp(self):
         self.dst = os.path.join(tmpdir, "dst")
         os.mkdir(self.dst)
-        self.db_config_dir = os.path.join(workdir, "db")
+        self.db_config_dir = os.path.join(config_dir, "db")
         self.config_path = os.path.join(self.db_config_dir,
                                         self.db_name + ".py")
         os.makedirs(self.db_config_dir)
@@ -726,9 +696,12 @@ class DBTest(unittest.TestCase, CommonDB):
         self.assertRdiffListOutput(Backup(["list", self.dst]), expected)
 
     def test_bad_db_name(self):
-        self.assertError(Backup(["db", "@GARBAGE@", self.dst]),
-                         "btw-backup: pg_dump exited with code: 1",
-                         1)
+        self.assertError(
+            Backup(["db", "@GARBAGE@", self.dst]),
+            'pg_dump: [archiver (db)] connection to database "@GARBAGE@" '
+            'failed: FATAL:  database "@GARBAGE@" does not exist\n'
+            'btw_backup: pg_dump exited with code: 1',
+            1)
 
     def test_contents(self):
         self.backup()

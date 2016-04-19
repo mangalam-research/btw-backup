@@ -22,6 +22,10 @@ setup(
         'pytimeparse>=1.1.4,<=2',
         'pyhash>=0.6.2,<1',
     ],
+    tests_require = [
+        'psycopg2>=2.5.2,<3'
+    ],
+    test_suite= 'nose.collector',
     data_files=[
         ('.', ['LICENSE', 'VERSION'])
     ],

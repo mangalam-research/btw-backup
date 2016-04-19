@@ -32,6 +32,9 @@ The files used by ``btw-backup`` at run-time are expected to be in
 ``~/.btw-backup/``, except if you use ``--config-dir`` to override
 it. This directory may contain the following files:
 
+* ``config.py``: a general configuration file for all operations
+  performed by ``btw-backup``.
+
 * ``global.py`` a configuration file for backups of database globals,
 
 * ``<db>.py`` a configuration file for database-specific
@@ -48,7 +51,14 @@ it. This directory may contain the following files:
 
   + ``backup``: a directory used by ``btw-backup`` during the backup operation.
 
-The following options are available:
+The following setting is available in the general configuration:
+
+* ``ROOT_PATH``: this is a required setting.  This is the path
+  relative to which all ``dst`` parameters are interpreted.
+
+The following settings are available in ``global.py`` and in the
+configuration files located in the subdirectories created with
+``fs-init``:
 
 * ``MAX_INCREMENTAL_COUNT`` the maximum number of incremental backups
   to allow before forcing a new full backup. This option only affects
@@ -63,7 +73,7 @@ The following options are available:
 
 * ``TYPE`` specifies the type of backup to perform. The two possible
   values are ``"rdiff"`` and ``"tar"``. This option is only valid in
-  filesystem backup configuration files.
+filesystem backup configuration files.
 
 Filesystem Backups
 ==================
@@ -83,8 +93,11 @@ When you want perform a backup, you do::
     $ btw-backup fs [-u UID:[GID]] src dst
 
 This will backup from ``src`` to the directory specified by
-``dst``. You may use ``-u`` to request that the ownership of the
-created files be set to ``UID:GID``.
+``dst``. **Remember that ``dst`` is relative to the ``ROOT_PATH``
+setting**. So if ``ROOT_PATH`` is ``/tmp/x`` and ``dst`` is ``foo``,
+then the backup will be stored in ``/tmp/x/foo``. You may use ``-u``
+to request that the ownership of the created files be set to
+``UID:GID``.
 
 Filesystem backups may be created using one of two methods:
 
@@ -121,11 +134,13 @@ There is not initialization command for database backups. You do::
     $ btw-backup db [-g] [-u UID[:GID]] [db] dst
 
 where ``db`` is the name of the database you want to backup and
-``dst`` is the directory where to store the backup. You can use ``-g``
-to do a backup of the database "globals". ``btw-backup`` uses
-``pg_dumpall -g`` to dump the globals. If you use ``-g``, then you
-must not give a database name on the command line. It is mandatory to
-give either a name or ``-g``.
+``dst`` is the directory where to store the backup. **Remember that
+``dst`` is relative to the ``ROOT_PATH`` setting**. So if
+``ROOT_PATH`` is ``/tmp/x`` and ``dst`` is ``foo``, then the backup
+will be stored in ``/tmp/x/foo``. You can use ``-g`` to do a backup of
+the database "globals". ``btw-backup`` uses ``pg_dumpall -g`` to dump
+the globals. If you use ``-g``, then you must not give a database name
+on the command line. It is mandatory to give either a name or ``-g``.
 
 All database backups use ``rdiff-backup``. The process is:
 

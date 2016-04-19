@@ -82,6 +82,21 @@ class Command(object):
         command as its first argument.
         """
         self.args = args
+        self._general_config = None
+        self.root = self.general_config.get("ROOT_PATH", None)
+        if self.root is None:
+            fatal("you must specify ROOT_PATH in the general configuration")
+
+    @property
+    def general_config(self):
+        if self._general_config is not None:
+            return self._general_config
+
+        general_config_path = os.path.join(self.args.config_dir,
+                                           "config.py")
+        self._general_config = {}
+        execfile(general_config_path, self._general_config)
+        return self._general_config
 
     def execute(self):
         "Executes the command"
@@ -269,7 +284,8 @@ class BaseBackupCommand(Command):
 
         :params msg: The message to store in the log file.
         """
-        log_path = os.path.join(self.args.dst, "log.txt")
+        log_relative_path = "log.txt"
+        log_path = os.path.join(self.root, self.args.dst, log_relative_path)
         with open(log_path, "a") as f:
             f.write(msg + "\n")
         self.chownif(log_path)
@@ -332,7 +348,7 @@ class RdiffBackupCommand(BaseBackupCommand):
                     self.chown(os.path.join(root, f))
 
     def execute_backup(self):
-        dst = self.args.dst
+        dst = os.path.join(self.root, self.args.dst)
         config = self.config
         backup_dir = self.backup_dir
 
@@ -453,7 +469,7 @@ class TarBackupCommand(SourceCommand, BaseBackupCommand):
 
     def execute_backup(self):
         src = self.args.src
-        dst = self.args.dst
+        dst = os.path.join(self.root, self.args.dst)
 
         files = sorted(x for x in os.listdir(dst) if fs_backup_re.match(x))
 
@@ -584,7 +600,7 @@ class List(Command):
     """
 
     def execute(self):
-        dst = self.args.dst
+        dst = os.path.join(self.root, self.args.dst)
 
         files = sorted(x for x in os.listdir(dst) if fs_backup_re.match(x))
         for f in files:
@@ -823,6 +839,9 @@ def main():
 
     try:
         args = parser.parse_args()
+
+        if hasattr(args, "dst") and args.dst[0] == "/":
+            fatal("the dst argument cannot be an absolute path")
 
         # Normalize the argument to a uid and a gid argument
         uidgid = getattr(args, "uid", None)

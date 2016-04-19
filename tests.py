@@ -49,6 +49,7 @@ def setUp():
     global config_dir
     tmpdir = tempfile.mkdtemp()
     config_dir = os.path.join(tmpdir, "config_dir")
+    reset_config()
 
 def tearDown():
     if tmpdir:
@@ -57,13 +58,19 @@ def tearDown():
         else:
             shutil.rmtree(tmpdir)
 
-def empty_tmpdir():
+def reset_config():
+    os.mkdir(config_dir)
+    with open(os.path.join(config_dir, "config.py"), 'w') as config:
+        config.write("ROOT_PATH=" + repr(tmpdir))
+
+def reset_tmpdir():
     for entry in os.listdir(tmpdir):
         path = os.path.join(tmpdir, entry)
         if os.path.isdir(path):
             shutil.rmtree(path)
         else:
             os.unlink(path)
+    reset_config()
 
 class BackupTestMixin(object):
 
@@ -178,12 +185,26 @@ class BackupTestMixin(object):
     def list(self, expected):
         self.assertRdiffListOutput(Backup(["list", self.dst]), expected)
 
+class CommonTests(unittest.TestCase, BackupTestMixin):
+
+    def tearDown(self):
+        reset_tmpdir()
+
+    def test_no_root(self):
+        open(os.path.join(config_dir, "config.py"), 'w').close()
+
+        self.assertError(
+            Backup(["fs-init", "--type=rdiff", "/tmp", "test"]),
+            "btw_backup: you must specify ROOT_PATH in the general "
+            "configuration", 1)
+
+
 class FSInitTest(unittest.TestCase, BackupTestMixin):
 
     src = os.path.join(os.getcwd(), "test-data/src")
 
     def tearDown(self):
-        empty_tmpdir()
+        reset_tmpdir()
 
     def test_lacking_all_params(self):
         self.assertError(
@@ -241,8 +262,8 @@ class FSRdiffTest(unittest.TestCase, BackupTestMixin):
     src = os.path.join(os.getcwd(), "test-data/src")
 
     def setUp(self):
-        self.dst = os.path.join(tmpdir, "dst")
-        os.mkdir(self.dst)
+        self.dst = "dst"
+        os.mkdir(os.path.join(tmpdir, self.dst))
 
         out = self.assertNoError(
             Backup(["fs-init", "--type=rdiff", self.src, "test"]),
@@ -251,10 +272,10 @@ class FSRdiffTest(unittest.TestCase, BackupTestMixin):
         self.workdir_path = out[len("btw_backup: created "):]
 
     def tearDown(self):
-        empty_tmpdir()
+        reset_tmpdir()
 
     def test_no_setup(self):
-        empty_tmpdir()
+        reset_tmpdir()
         self.assertError(
             Backup(["fs", self.src, self.dst]),
             "btw_backup: no working directory for: "
@@ -287,7 +308,7 @@ class FSRdiffTest(unittest.TestCase, BackupTestMixin):
         subprocess.check_output(
             ["rdiff-backup", "-r",
              last_date,
-             os.path.join(self.dst, last_date), restore_path])
+             os.path.join(tmpdir, self.dst, last_date), restore_path])
 
         paths = os.listdir(restore_path)
         self.assertEqual(paths, ["backup.tar"])
@@ -366,7 +387,7 @@ class FSRdiffTest(unittest.TestCase, BackupTestMixin):
 
         # Check the log
         self.assertRegexpMatches(
-            open(os.path.join(self.dst, "log.txt"), 'r').read(),
+            open(os.path.join(tmpdir, self.dst, "log.txt"), 'r').read(),
             ur"^.*: no change in the data to be backed up: "
             "skipping creation of new full backup\n$")
 
@@ -375,8 +396,8 @@ class FSTarTest(unittest.TestCase, BackupTestMixin):
     src = os.path.join(os.getcwd(), "test-data/src")
 
     def setUp(self):
-        self.dst = os.path.join(tmpdir, "dst")
-        os.mkdir(self.dst)
+        self.dst = "dst"
+        os.mkdir(os.path.join(tmpdir, self.dst))
 
         out = self.assertNoError(
             Backup(["fs-init", "--type=tar", self.src, "test"]),
@@ -385,7 +406,7 @@ class FSTarTest(unittest.TestCase, BackupTestMixin):
         self.workdir_path = out[len("btw_backup: created "):]
 
     def tearDown(self):
-        empty_tmpdir()
+        reset_tmpdir()
 
     def init(self, src, name="test"):
         backup = Backup(["fs-init", "--type=tar", src, name])
@@ -396,7 +417,7 @@ class FSTarTest(unittest.TestCase, BackupTestMixin):
         return out[len("btw_backup: created "):]
 
     def test_no_setup(self):
-        empty_tmpdir()
+        reset_tmpdir()
         self.assertError(
             Backup(["fs", self.src, self.dst]),
             "btw_backup: no working directory for: "
@@ -427,7 +448,8 @@ class FSTarTest(unittest.TestCase, BackupTestMixin):
         restore_path = tempfile.mkdtemp(dir=tmpdir)
         last_date = backups[-1].isoformat()
         subprocess.check_call(["tar", "-C", restore_path, "-xf",
-                               os.path.join(self.dst, last_date + ".tbz")])
+                               os.path.join(tmpdir, self.dst,
+                                            last_date + ".tbz")])
 
         # Check the files.
         subprocess.check_call(["diff", "-rN", restore_path, self.src])
@@ -444,7 +466,7 @@ class FSTarTest(unittest.TestCase, BackupTestMixin):
 
         # Check the log
         self.assertRegexpMatches(
-            open(os.path.join(self.dst, "log.txt"), 'r').read(),
+            open(os.path.join(tmpdir, self.dst, "log.txt"), 'r').read(),
             ur"^.*: no change in the data to be backed up: "
             "dropping backup\n$")
 
@@ -453,11 +475,11 @@ class ListTest(unittest.TestCase, BackupTestMixin):
     src = os.path.join(os.getcwd(), "test-data/src")
 
     def setUp(self):
-        self.dst = os.path.join(tmpdir, "dst")
-        os.mkdir(self.dst)
+        self.dst = "dst"
+        os.mkdir(os.path.join(tmpdir, self.dst))
 
     def tearDown(self):
-        empty_tmpdir()
+        reset_tmpdir()
 
     def test_empty(self):
         self.assertNoError(Backup(["list", self.dst]))
@@ -589,8 +611,8 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
     count = 1
 
     def setUp(self):
-        self.dst = os.path.join(tmpdir, "dst")
-        os.mkdir(self.dst)
+        self.dst = "dst"
+        os.mkdir(os.path.join(tmpdir, self.dst))
         self.db_config_dir = os.path.join(config_dir, "db")
         self.config_path = os.path.join(self.db_config_dir, "global.py")
         os.makedirs(self.db_config_dir)
@@ -600,7 +622,7 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
 
     def tearDown(self):
         if not preserve:
-            empty_tmpdir()
+            reset_tmpdir()
 
     def backup(self, args=None):
         if args is None:
@@ -638,9 +660,9 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
         self.alter_db()
         self.backup()
 
-        last = sorted([x for x in os.listdir(self.dst)
+        last = sorted([x for x in os.listdir(os.path.join(tmpdir, self.dst))
                        if main.fs_backup_re.match(x)])[-1]
-        last_backup = os.path.join(self.dst, last, "global.sql.bz2")
+        last_backup = os.path.join(tmpdir, self.dst, last, "global.sql.bz2")
         contents = None
         with bz2.BZ2File(last_backup, 'r') as f:
             contents = f.read()
@@ -670,15 +692,15 @@ class DBTest(unittest.TestCase, CommonDB):
         subprocess.check_call(["dropdb", cls.db_name])
 
     def setUp(self):
-        self.dst = os.path.join(tmpdir, "dst")
-        os.mkdir(self.dst)
+        self.dst = "dst"
+        os.mkdir(os.path.join(tmpdir, self.dst))
         self.db_config_dir = os.path.join(config_dir, "db")
         self.config_path = os.path.join(self.db_config_dir,
                                         self.db_name + ".py")
         os.makedirs(self.db_config_dir)
 
     def tearDown(self):
-        empty_tmpdir()
+        reset_tmpdir()
 
     def alter_db(self):
         conn = self.conn
@@ -708,9 +730,10 @@ class DBTest(unittest.TestCase, CommonDB):
         self.alter_db()
         self.backup()
 
-        last = sorted([x for x in os.listdir(self.dst)
+        last = sorted([x for x in os.listdir(os.path.join(tmpdir, self.dst))
                        if main.fs_backup_re.match(x)])[-1]
-        last_backup = os.path.join(self.dst, last, self.db_name + ".dump")
+        last_backup = os.path.join(tmpdir, self.dst, last,
+                                   self.db_name + ".dump")
         contents = subprocess.check_output(["pg_restore", last_backup])
         expected_contents = \
             subprocess.check_output(["pg_dump", self.db_name])

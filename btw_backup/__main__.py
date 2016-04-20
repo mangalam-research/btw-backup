@@ -18,15 +18,6 @@ from contextlib import closing
 import pytimeparse
 from pyhash import murmur3_32
 
-#
-# A note on compression. Compressing a tar file is problematic when
-# using rdiff-backup, as a single byte change in the source can have a
-# ripple effect on the whole tbz file. So we don't compress tar
-# files. Database dumps that are specific to a single database are
-# also not compressed, but for different reasons. A cluster-wide
-# database dump (with ``-g``) is compressed but the issue mentioned
-# above does not matter so much.
-#
 
 dirname = os.path.dirname(__file__)
 

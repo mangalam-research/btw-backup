@@ -20,6 +20,8 @@ setup(
     install_requires=[
         'pytimeparse>=1.1.4,<=2',
         'pyhash>=0.6.2,<1',
+        'pyee>=1.0.2,<2',
+        'awscli>=1.10.21,<2'
     ],
     tests_require = [
         'psycopg2>=2.5.2,<3'

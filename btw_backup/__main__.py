@@ -18,6 +18,8 @@ from contextlib import closing
 import pytimeparse
 from pyhash import murmur3_32
 
+from .sync import SyncState, S3Cmd
+from .errors import FatalUserError
 
 dirname = os.path.dirname(__file__)
 
@@ -28,9 +30,6 @@ prog = None
 dumpall_cmd = ["pg_dumpall", "-g"]
 
 os.umask(0077)
-
-class FatalError(Exception):
-    pass
 
 class Exit(Exception):
 
@@ -91,6 +90,11 @@ class Command(object):
 
     def execute(self):
         "Executes the command"
+        pass
+
+    def sync(self):
+        "Synchronizes with offsite storage"
+        # Not all commands store anything offsite...
         pass
 
 class SourceCommand(Command):
@@ -229,6 +233,9 @@ class BaseBackupCommand(Command):
         A mixin or base class for all backup commands.
         """
         super(BaseBackupCommand, self).__init__(args)
+        sync_state_path = os.path.join(self.args.config_dir, "sync_state")
+        self.sync_state = SyncState(sync_state_path)
+        self.sync_backend = S3Cmd(self.general_config, self.sync_state)
 
     @property
     def config(self):
@@ -243,6 +250,9 @@ class BaseBackupCommand(Command):
         must be implemented by derived classes.
         """
         raise NotImplementedError
+
+    def sync(self):
+        self.sync_backend.run()
 
     def chownif(self, path):
         """
@@ -280,6 +290,27 @@ class BaseBackupCommand(Command):
         with open(log_path, "a") as f:
             f.write(msg + "\n")
         self.chownif(log_path)
+        self.push_path(os.path.join(self.args.dst, log_relative_path))
+
+    def push_path(self, path):
+        self.sync_state.push_path(path)
+
+    def sync_path(self, path):
+        self.sync_state.sync_path(path)
+
+
+class Sync(BaseBackupCommand):
+    def __init__(self, args):
+        """
+        Sync ROOT_PATH with S3 storage. You would use this if you already
+        have backups on the local machine and want to synchronize them
+        to a new S3 location.
+        """
+        super(Sync, self).__init__(args)
+
+    def execute(self):
+        self.sync_path("")
+        self.sync()
 
 class RdiffBackupCommand(BaseBackupCommand):
 
@@ -398,6 +429,8 @@ class RdiffBackupCommand(BaseBackupCommand):
                 os.utime(self.outfile, None)
 
                 self.rdiff_backup(backup_dir, last_path)
+                # This path won't have the final "/" unless we add it.
+                self.sync_path(os.path.join(self.args.dst, last) + "/")
         else:
             #
             # We do this so that we don't start two backups in the same
@@ -432,6 +465,10 @@ class RdiffBackupCommand(BaseBackupCommand):
                 os.mkdir(new_dir_path)
 
                 self.rdiff_backup(backup_dir, new_dir_path)
+                # This path will never have a "/" at the end unless we
+                # add it.
+                self.push_path(os.path.join(self.args.dst, new_dir_name) +
+                               "/")
 
 
 class TarBackupCommand(SourceCommand, BaseBackupCommand):
@@ -447,8 +484,7 @@ class TarBackupCommand(SourceCommand, BaseBackupCommand):
     def execute(self):
         src = self.src
 
-        working_dir = self.working_dir
-        if working_dir is None:
+        if self.working_dir is None:
             fatal("no working directory for: " + src)
 
         backup_dir = self.backup_dir
@@ -498,6 +534,8 @@ class TarBackupCommand(SourceCommand, BaseBackupCommand):
                      ": no change in the data to be backed up: "
                      "dropping backup")
             os.unlink(new_backup_path)
+        else:
+            self.push_path(os.path.join(self.args.dst, new_backup_name))
 
 class SourceRdiffBackupCommand(SourceCommand, RdiffBackupCommand):
     """
@@ -508,8 +546,7 @@ class SourceRdiffBackupCommand(SourceCommand, RdiffBackupCommand):
     def execute(self):
         src = self.src
 
-        working_dir = self.working_dir
-        if working_dir is None:
+        if self.working_dir is None:
             fatal("no working directory for: " + src)
 
         backup_dir = self.backup_dir
@@ -535,22 +572,29 @@ class FSBackup(SourceCommand):
     Backs up a filesystem hierarchy.
     """
 
-    def execute(self):
-        src = self.args.src
+    def __init__(self, *args, **kwargs):
+        super(FSBackup, self).__init__(*args, **kwargs)
 
-        working_dir = self.working_dir
-        if working_dir is None:
-            fatal("no working directory for: " + src)
+        if self.working_dir is None:
+            fatal("no working directory for: " + self.args.src)
 
         config = self.config
         backup_type = config.get("TYPE")
+        sub = None
         if backup_type == "rdiff":
-            return SourceRdiffBackupCommand(self.args).execute()
+            sub = SourceRdiffBackupCommand(self.args)
         elif backup_type == "tar":
-            return TarBackupCommand(self.args).execute()
+            sub = TarBackupCommand(self.args)
+        else:
+            fatal("unknown backup type: " + backup_type)
 
-        fatal("unknown backup type: " + backup_type)
-        return 0
+        self.sub = sub
+
+    def execute(self):
+        return self.sub.execute()
+
+    def sync(self):
+        return self.sub.sync()
 
 
 def get_incrementals_for(fullpath, include_full=False):
@@ -828,22 +872,38 @@ def main():
     db_sp.add_argument('--fake-dumpall', action='store',
                        help=argparse.SUPPRESS)
 
+
+    sync_sp = subparsers.add_parser(
+        "sync",
+        description=List.__doc__,
+        help="sync the files from ROOT_PATH to S3 storage",
+        formatter_class=argparse.RawTextHelpFormatter)
+    sync_sp.set_defaults(class_=Sync)
+
     try:
-        args = parser.parse_args()
+        try:
+            args = parser.parse_args()
 
-        if hasattr(args, "dst") and args.dst[0] == "/":
-            fatal("the dst argument cannot be an absolute path")
+            if hasattr(args, "dst") and args.dst[0] == "/":
+                fatal("the dst argument cannot be an absolute path")
 
-        # Normalize the argument to a uid and a gid argument
-        uidgid = getattr(args, "uid", None)
-        if uidgid:
-            uid, gid = uidgid.split(":")
-            args.uid = pwd.getpwnam(uid).pw_uid
-            args.gid = grp.getgrnam(gid).gr_gid
+            # Normalize the argument to a uid and a gid argument
+            uidgid = getattr(args, "uid", None)
+            if uidgid:
+                uid, gid = uidgid.split(":")
+                args.uid = pwd.getpwnam(uid).pw_uid
+                args.gid = grp.getgrnam(gid).gr_gid
 
-        return args.class_(args).execute()
+            cmd = args.class_(args)
+            try:
+                return cmd.execute()
+            finally:
+                cmd.sync()
+        except FatalUserError as ex:
+            fatal(str(ex))
     except Exit as ex:
         sys.exit(ex.args[0])
+
 
 if __name__ == "__main__":
     main()

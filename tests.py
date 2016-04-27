@@ -303,7 +303,8 @@ class BackupTestMixin(object):
             shutil.rmtree(self.tmp_src)
         super(BackupTestMixin, self).tearDown()
 
-    def assertNoError(self, backup, expected_output="", regexp=False):
+    def assertNoError(self, backup, expected_output="", regexp=False,
+                      dont_compare=False):
         backup.join()
         ret = backup.outstr
         err = backup.errstr
@@ -315,7 +316,9 @@ class BackupTestMixin(object):
             self.assertRegexpMatches(ret, expected_output)
         self.assertEqual(backup.exitcode, 0)
 
-        if backup.args[0] in ("db", "fs", "sync"):
+        if not dont_compare and \
+           (backup.args[0] in ("db", "fs") or \
+            (backup.args[0] == "sync" and backup.args[1] != "--list")):
             self.check_off_site_sync()
 
         return ret
@@ -1076,11 +1079,44 @@ class SyncTest(BackupTestMixin, unittest.TestCase):
         reset_server()
         super(SyncTest, self).tearDown()
 
-    def test(self):
+    def test_full(self):
         # Create some files in dst
         shutil.copytree(self.src, self.dst_full)
 
-        self.assertNoError(Backup(["sync"]))
+        self.assertNoError(Backup(["sync", "--full"]))
+
+    def test_list(self):
+        # Create some files in dst
+        shutil.copytree(self.src, self.dst_full)
+
+        # Write a fake state.
+        with open(os.path.join(config_dir, "sync_state"), 'w') as state:
+            state.write("""\
+2016-01-01T12:00:00 +push dst/a
+2016-01-01T12:00:00 +push dst/b
+2016-01-01T12:00:00 +sync dst
+""")
+
+        self.assertNoError(Backup(["sync", "--list"]), """\
+Must sync: dst
+Must push: dst/a
+Must push: dst/b\
+""")
+
+    def test_default(self):
+        # Create some files in dst
+        shutil.copytree(self.src, self.dst_full)
+
+        # Write a fake state.
+        with open(os.path.join(config_dir, "sync_state"), 'w') as state:
+            state.write("""\
+2016-01-01T12:00:00 +push dst/a
+""")
+
+        self.assertNoError(Backup(["sync"]), dont_compare=True)
+
+        self.assertTrue(os.path.exists(os.path.join(server_dir,
+                                                    "foo/backups/dst/a")))
 
 
 class CommonDB(BackupTestMixin):

@@ -307,10 +307,28 @@ class Sync(BaseBackupCommand):
         to a new S3 location.
         """
         super(Sync, self).__init__(args)
+        if self.args.full and self.args.list:
+            raise Exception("--full and --list are not allowed together")
+        self.suppress_sync = False
+
+    def sync(self):
+        if not self.suppress_sync:
+            return super(Sync, self).sync()
 
     def execute(self):
-        self.sync_path("")
-        self.sync()
+        if self.args.list:
+            current_state = self.sync_state.current_state
+            for path in current_state["sync"]:
+                print("Must sync: " + path)
+
+            for path in current_state["push"]:
+                print("Must push: " + path)
+            self.suppress_sync = True
+        elif self.args.full:
+            self.sync_path("")
+
+        # We do not execute self.sync because this is done by default
+        # with all command executions.
 
 class RdiffBackupCommand(BaseBackupCommand):
 
@@ -876,9 +894,19 @@ def main():
     sync_sp = subparsers.add_parser(
         "sync",
         description=List.__doc__,
-        help="sync the files from ROOT_PATH to S3 storage",
+        help="sync files to S3 storage",
         formatter_class=argparse.RawTextHelpFormatter)
     sync_sp.set_defaults(class_=Sync)
+    sync_sp.add_argument("--full",
+                         dest="full",
+                         action="store_true",
+                         help="do a full sync of everything in ROOT_PATH to "
+                         "S3 storage; the default is to sync only files "
+                         "needing syncing")
+    sync_sp.add_argument("--list",
+                         dest="list",
+                         action="store_true",
+                         help="only list the files that need syncing")
 
     try:
         try:

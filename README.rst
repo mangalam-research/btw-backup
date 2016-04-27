@@ -8,8 +8,8 @@ Synopsis
 
 ::
 
-    btw_backup [-h] [-q] [--config-dir CONFIG_DIR] [--version]
-                        {fs,fs-init,list,db} ...
+    usage: btw-backup [-h] [-q] [--config-dir CONFIG_DIR] [--version]
+                      {fs,fs-init,list,db,sync} ...
 
     optional arguments:
       -h, --help            show this help message and exit
@@ -19,11 +19,18 @@ Synopsis
       --version             show program's version number and exit
 
     subcommands:
-      {fs,fs-init,list,db}
+      {fs,fs-init,list,db,sync}
         fs                  backs up a filesystem hierarchy
         fs-init             initializes the working directory for backups
         list                lists backups
         db                  makes a database backup
+        sync                sync files to S3 storage
+
+.. note:: The ``sync`` subcommand is really used for exceptional
+          cases, like when syncing to S3 the first time, for checking
+          whether things need to be synced or forcing a sync
+          immediately. Synchronizations happen automatically after a
+          backup is run.
 
 Configuration
 =============

@@ -50,6 +50,7 @@ class Backup(object):
         return self.proc.wait()
 
 tmpdir = None
+root_dir = None
 config_dir = None
 server = None
 server_dir = None
@@ -92,6 +93,7 @@ secret_key                <not set>             None    None
 def setUp():
     # pylint: disable=global-statement
     global tmpdir
+    global root_dir
     global config_dir
     global server
     global server_dir
@@ -105,9 +107,11 @@ def setUp():
     check_aws_profile(None)
     check_aws_profile("btw-backup-test")
 
+    root_dir = os.path.join(tmpdir, "root")
     config_dir = os.path.join(tmpdir, "config_dir")
     server_dir = os.path.join(tmpdir, "server")
     os.mkdir(server_dir)
+    os.mkdir(root_dir)
 
     # Start a fake aws server
     server_host = "localhost"
@@ -252,10 +256,11 @@ ROOT_PATH={0}
 AWSCLI_PROFILE="btw-backup-test"
 S3_URI_PREFIX="s3://foo/backups/"
 S3CMD_CONFIG={1}
-""".format(repr(tmpdir), repr(s3cmd_config_path)))
+""".format(repr(root_dir), repr(s3cmd_config_path)))
 
 def reset_tmpdir():
     reset_config()
+    clean_dir(root_dir)
 
 def reset_server():
     if not preserve:
@@ -431,6 +436,7 @@ class BaseStateTest(unittest.TestCase):
     def tearDown(self):
         if os.path.exists(self.state_path):
             os.unlink(self.state_path)
+        reset_tmpdir()
 
     def assertStateFile(self, expected):
         with open(self.state_path, 'r') as state_file:
@@ -595,7 +601,7 @@ class S3Test(BaseStateTest):
         state = SyncState(self.state_path)
         s3 = S3Null({
             "S3_URI_PREFIX": "s3://foo",
-            "ROOT_PATH": tmpdir,
+            "ROOT_PATH": root_dir,
         }, state)
         with self.assertRaisesRegexp(
                 ValueError,
@@ -606,19 +612,25 @@ class S3Test(BaseStateTest):
         state = SyncState(self.state_path)
         s3 = S3Null({
             "S3_URI_PREFIX": "s3://foo",
-            "ROOT_PATH": tmpdir,
+            "ROOT_PATH": root_dir,
         }, state)
+
+        with open(os.path.join(root_dir, "foo"), 'w') as foo:
+            pass
+
         with self.assertRaisesRegexp(
                 ValueError,
-                ur"^trying to sync a path which is not a directory: s3cmd"):
-            state.sync_path("s3cmd")
+                ur"^trying to sync a path which is not a directory: foo"):
+            state.sync_path("foo")
 
     def test_pushes_and_syncs(self):
         state = SyncState(self.state_path)
         s3 = S3Null({
             "S3_URI_PREFIX": "s3://foo",
-            "ROOT_PATH": tmpdir,
+            "ROOT_PATH": root_dir,
         }, state)
+
+        os.mkdir(os.path.join(root_dir, "server"))
 
         state.sync_path("server")
         state.sync_path("")
@@ -635,8 +647,10 @@ class S3Test(BaseStateTest):
         state = SyncState(self.state_path)
         s3 = S3Null({
             "S3_URI_PREFIX": "s3://foo",
-            "ROOT_PATH": tmpdir,
+            "ROOT_PATH": root_dir,
         }, state)
+
+        os.mkdir(os.path.join(root_dir, "server"))
 
         state.sync_path("server")
         state.sync_path("")
@@ -677,7 +691,7 @@ class S3Test(BaseStateTest):
 2016-01-01T12:00:00 +push b
 2016-01-01T12:00:00 -push b
 2016-01-01T12:00:00 -sync server
-""".format(tmpdir))
+""")
 
 class CommonTests(BackupTestMixin, unittest.TestCase):
 
@@ -698,7 +712,7 @@ class CommonTests(BackupTestMixin, unittest.TestCase):
             config.write("""
 ROOT_PATH={0}
 S3_URI_PREFIX="q"
-""".format(repr(tmpdir)))
+""".format(repr(root_dir)))
 
         self.assertError(
             Backup(["db", "-g", "test"]),
@@ -710,7 +724,7 @@ S3_URI_PREFIX="q"
             config.write("""
 ROOT_PATH={0}
 S3CMD_CONFIG="q"
-""".format(repr(tmpdir)))
+""".format(repr(root_dir)))
 
         self.assertError(
             Backup(["db", "-g", "test"]),
@@ -783,7 +797,7 @@ class FSRdiffTest(BackupTestMixin, unittest.TestCase):
 
     def setUp(self):
         self.dst = "dst"
-        self.dst_full = os.path.join(tmpdir, self.dst)
+        self.dst_full = os.path.join(root_dir, self.dst)
         os.mkdir(self.dst_full)
 
         self.assertNoError(
@@ -832,7 +846,7 @@ class FSRdiffTest(BackupTestMixin, unittest.TestCase):
         subprocess.check_output(
             ["rdiff-backup", "-r",
              last_date,
-             os.path.join(tmpdir, self.dst, last_date), restore_path])
+             os.path.join(self.dst_full, last_date), restore_path])
 
         paths = os.listdir(restore_path)
         self.assertEqual(paths, ["backup.tar"])
@@ -911,7 +925,7 @@ class FSRdiffTest(BackupTestMixin, unittest.TestCase):
 
         # Check the log
         self.assertRegexpMatches(
-            open(os.path.join(tmpdir, self.dst, "log.txt"), 'r').read(),
+            open(os.path.join(self.dst_full, "log.txt"), 'r').read(),
             ur"^.*: no change in the data to be backed up: "
             "skipping creation of new full backup\n$")
 
@@ -921,7 +935,7 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
 
     def setUp(self):
         self.dst = "dst"
-        self.dst_full = os.path.join(tmpdir, self.dst)
+        self.dst_full = os.path.join(root_dir, self.dst)
         os.mkdir(self.dst_full)
 
         self.assertNoError(
@@ -977,7 +991,7 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
         restore_path = tempfile.mkdtemp(dir=tmpdir)
         last_date = backups[-1].isoformat()
         subprocess.check_call(["tar", "-C", restore_path, "-xf",
-                               os.path.join(tmpdir, self.dst,
+                               os.path.join(self.dst_full,
                                             last_date + ".tbz")])
 
         # Check the files.
@@ -995,7 +1009,7 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
 
         # Check the log
         self.assertRegexpMatches(
-            open(os.path.join(tmpdir, self.dst, "log.txt"), 'r').read(),
+            open(os.path.join(self.dst_full, "log.txt"), 'r').read(),
             ur"^.*: no change in the data to be backed up: "
             "dropping backup\n$")
 
@@ -1005,7 +1019,7 @@ class ListTest(BackupTestMixin, unittest.TestCase):
 
     def setUp(self):
         self.dst = "dst"
-        self.dst_full = os.path.join(tmpdir, self.dst)
+        self.dst_full = os.path.join(root_dir, self.dst)
         os.mkdir(self.dst_full)
 
     def tearDown(self):
@@ -1053,7 +1067,7 @@ class SyncTest(BackupTestMixin, unittest.TestCase):
 
     def setUp(self):
         self.dst = "dst"
-        self.dst_full = os.path.join(tmpdir, self.dst)
+        self.dst_full = os.path.join(root_dir, self.dst)
 
     def tearDown(self):
         if os.path.exists(self.dst_full):
@@ -1169,7 +1183,7 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
 
     def setUp(self):
         self.dst = "dst"
-        self.dst_full = os.path.join(tmpdir, self.dst)
+        self.dst_full = os.path.join(root_dir, self.dst)
         os.mkdir(self.dst_full)
         self.db_config_dir = os.path.join(config_dir, "db")
         self.config_path = os.path.join(self.db_config_dir, "global.py")
@@ -1223,9 +1237,9 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
         self.alter_db()
         self.backup()
 
-        last = sorted([x for x in os.listdir(os.path.join(tmpdir, self.dst))
+        last = sorted([x for x in os.listdir(self.dst_full)
                        if main.fs_backup_re.match(x)])[-1]
-        last_backup = os.path.join(tmpdir, self.dst, last, "global.sql.bz2")
+        last_backup = os.path.join(self.dst_full, last, "global.sql.bz2")
         contents = None
         with bz2.BZ2File(last_backup, 'r') as f:
             contents = f.read()
@@ -1256,7 +1270,7 @@ class DBTest(unittest.TestCase, CommonDB):
 
     def setUp(self):
         self.dst = "dst"
-        self.dst_full = os.path.join(tmpdir, self.dst)
+        self.dst_full = os.path.join(root_dir, self.dst)
         os.mkdir(self.dst_full)
         self.db_config_dir = os.path.join(config_dir, "db")
         self.config_path = os.path.join(self.db_config_dir,
@@ -1299,9 +1313,9 @@ class DBTest(unittest.TestCase, CommonDB):
         self.alter_db()
         self.backup()
 
-        last = sorted([x for x in os.listdir(os.path.join(tmpdir, self.dst))
+        last = sorted([x for x in os.listdir(self.dst_full)
                        if main.fs_backup_re.match(x)])[-1]
-        last_backup = os.path.join(tmpdir, self.dst, last,
+        last_backup = os.path.join(self.dst_full, last,
                                    self.db_name + ".dump")
         contents = subprocess.check_output(["pg_restore", last_backup])
         expected_contents = \

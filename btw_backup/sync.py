@@ -64,7 +64,7 @@ class SyncState(object):
 
         self._file.seek(0)
         for line in self._file:
-            line = line.strip()
+            line = line.rstrip("\r\n")
             (_, op, path) = line.split(" ", 2)
             self._update_state(op, path)
         self._file.seek(0, os.SEEK_END)

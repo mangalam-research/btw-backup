@@ -527,6 +527,19 @@ class SyncStateTest(BaseStateTest):
             "sync": set(("c",))
         })
 
+        # This simulates a push that happened on the path "", which is
+        # a valid path. It is equivalent to ROOT_PATH.
+        self.storeToState("""\
+2016-01-01T12:00:00 +sync \n\
+""")
+
+        state = SyncState(self.state_path).current_state
+        self.assertEqual(state, {
+            "push": set(),
+            "sync": set(("",))
+        })
+
+
     def test_emits_on_push_path(self):
         state = SyncState(self.state_path)
         paths = []

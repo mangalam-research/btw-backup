@@ -66,12 +66,12 @@ class SyncState(object):
         for line in self._file:
             line = line.rstrip("\r\n")
             (_, op, path) = line.split(" ", 2)
-            self._update_state(op, path)
+            self._update_state(op, path, reading=True)
         self._file.seek(0, os.SEEK_END)
 
         return self._current_state
 
-    def _update_state(self, op, path):
+    def _update_state(self, op, path, reading=False):
         op_prefix = op[0]
         op_suffix = op[1:]
 
@@ -91,11 +91,13 @@ class SyncState(object):
         else:
             raise ValueError("invalid op: " + op)
 
-        ss_file = self._file
-        now = datetime.datetime.utcnow().replace(microsecond=0)
-        ss_file.write("{0} {1} {2}\n".format(now.isoformat(), op, path))
-        ss_file.flush()
-        os.fsync(ss_file.fileno())
+        # We do not write to file when we are reading
+        if not reading:
+            ss_file = self._file
+            now = datetime.datetime.utcnow().replace(microsecond=0)
+            ss_file.write("{0} {1} {2}\n".format(now.isoformat(), op, path))
+            ss_file.flush()
+            os.fsync(ss_file.fileno())
 
     def push_path(self, path):
         """

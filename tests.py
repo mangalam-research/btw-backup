@@ -441,9 +441,12 @@ class BaseStateTest(unittest.TestCase):
             os.unlink(self.state_path)
         reset_tmpdir()
 
-    def assertStateFile(self, expected):
+    def assertStateFile(self, expected, raw=False):
         with open(self.state_path, 'r') as state_file:
-            self.assertEqual(clean_times(state_file.read()), expected)
+            actual = state_file.read()
+            if not raw:
+                actual = clean_times(actual)
+            self.assertEqual(actual, expected)
 
     def storeToState(self, store):
         with open(self.state_path, 'w') as state_file:
@@ -507,6 +510,23 @@ class SyncStateTest(BaseStateTest):
 2016-01-01T12:00:00 -push a
 2016-01-01T12:00:00 -sync d
 """)
+
+    def test_does_not_modify_a_file_if_nothing_changes(self):
+        self.storeToState("""\
+2016-01-01T12:00:00 +push a
+2016-01-01T12:00:00 +push b
+2016-01-01T12:00:00 +sync c
+2016-01-01T12:00:00 +sync d
+""")
+        state = SyncState(self.state_path)
+        state.current_state
+
+        self.assertStateFile("""\
+2016-01-01T12:00:00 +push a
+2016-01-01T12:00:00 +push b
+2016-01-01T12:00:00 +sync c
+2016-01-01T12:00:00 +sync d
+""", raw=True)
 
     def test_reads_from_file(self):
         self.storeToState("""\

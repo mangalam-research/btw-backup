@@ -893,7 +893,7 @@ def main():
 
     sync_sp = subparsers.add_parser(
         "sync",
-        description=List.__doc__,
+        description=Sync.__doc__,
         help="sync files to S3 storage",
         formatter_class=argparse.RawTextHelpFormatter)
     sync_sp.set_defaults(class_=Sync)

@@ -119,7 +119,7 @@ def setUp():
     server_endpoint = "http://{0}:{1}".format(server_host, server_port)
     server = subprocess.Popen(["./node_modules/.bin/s3rver", "-p",
                                str(server_port),
-                               "-s", # Silent
+                               "-s",  # Silent
                                "-d", server_dir])
 
     # Make btw-backup connect to our server.
@@ -139,8 +139,8 @@ output=json
     with open(os.path.join(aws_dir, "credentials"), 'w') as config:
         config.write("""
 [btw-backup-test]
-aws_access_key_id=x
-aws_secret_access_key=x
+aws_access_key_id=S3RVER
+aws_secret_access_key=S3RVER
 """)
     subprocess.check_call(["aws", "s3",
                            "--endpoint=" + server_endpoint,
@@ -152,8 +152,8 @@ aws_secret_access_key=x
     with open(s3cmd_config_path, 'w') as config:
         config.write("""
 [default]
-access_key = x
-access_token =
+access_key = S3RVER
+# access_token = x
 add_encoding_exts =
 add_headers =
 bucket_location = US
@@ -207,7 +207,7 @@ recv_chunk = 65536
 reduced_redundancy = False
 requester_pays = False
 restore_days = 1
-secret_key = x
+secret_key = S3RVER
 send_chunk = 65536
 server_side_encryption = False
 signature_v2 = False
@@ -226,7 +226,7 @@ website_error =
 website_index = index.html
 """.format(host=server_host, port=server_port))
 
-    subprocess.check_call(["s3cmd", "ls","s3://foo"], env=backup_env)
+    subprocess.check_call(["s3cmd", "ls", "s3://foo"], env=backup_env)
     reset_config()
 
 
@@ -292,6 +292,14 @@ def diff_against_server(path, server_relative_path):
         finally:
             shutil.rmtree(diff_dir)
 
+def exists_on_server(file_path):
+    # s3rver used to just store files with the same name as how they appear to
+    # s3 clients. But it now stores files as 3 different files on dist.  To
+    # check for the existence of a file we check that one of the internally
+    # named files exists.
+    return os.path.exists(os.path.join(server_dir,
+                                       "{}._S3rver_object".format(file_path)))
+
 class BackupTestMixin(object):
 
     def __init__(self, *args, **kwargs):
@@ -317,13 +325,11 @@ class BackupTestMixin(object):
         self.assertEqual(backup.exitcode, 0)
 
         if not dont_compare and \
-           (backup.args[0] in ("db", "fs") or \
-            (backup.args[0] == "sync" and backup.args[1] != "--list")):
+           (backup.args[0] in ("db", "fs") or
+                (backup.args[0] == "sync" and backup.args[1] != "--list")):
             self.check_off_site_sync()
 
         return ret
-
-
 
     def assertRdiffListOutput(self, backup, expected):
         backup.join()
@@ -433,6 +439,7 @@ def clean_times(src):
     return time_re.sub("2016-01-01T12:00:00", src)
 
 class BaseStateTest(unittest.TestCase):
+
     def setUp(self):
         self.state_path = os.path.join(tmpdir, "test_state")
 
@@ -454,6 +461,7 @@ class BaseStateTest(unittest.TestCase):
 
 
 class SyncStateTest(BaseStateTest):
+
     def test_is_mutually_exclusive(self):
         state = SyncState(self.state_path)
 
@@ -568,7 +576,6 @@ class SyncStateTest(BaseStateTest):
             "sync": set(("",))
         })
 
-
     def test_emits_on_push_path(self):
         state = SyncState(self.state_path)
         paths = []
@@ -602,6 +609,7 @@ class S3Null(S3):
         self._synced.add(path)
 
 class S3Test(BaseStateTest):
+
     def test_raises_if_s3_uri_prefix_missing(self):
         state = SyncState(self.state_path)
         with self.assertRaisesRegexp(
@@ -688,7 +696,7 @@ class S3Test(BaseStateTest):
 
         # Some went through.
         self.assertEqual(s3._pushed, set(("b", )))
-        self.assertEqual(s3._synced, set(("server",  )))
+        self.assertEqual(s3._synced, set(("server",)))
 
         # Some failed.
         self.assertRegexpMatches(
@@ -973,7 +981,6 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
         reset_server()
         super(FSTarTest, self).tearDown()
 
-
     def init(self, src, name="test"):
         backup = Backup(["fs-init", "--type=tar", src, name])
         out = self.assertNoError(
@@ -1051,7 +1058,6 @@ class ListTest(BackupTestMixin, unittest.TestCase):
         reset_tmpdir()
         reset_server()
         super(ListTest, self).tearDown()
-
 
     def test_empty(self):
         self.assertNoError(Backup(["list", self.dst]))
@@ -1135,8 +1141,7 @@ Must push: dst/b\
 
         self.assertNoError(Backup(["sync"]), dont_compare=True)
 
-        self.assertTrue(os.path.exists(os.path.join(server_dir,
-                                                    "foo/backups/dst/a")))
+        self.assertTrue(exists_on_server("foo/backups/dst/a"))
 
 
 class CommonDB(BackupTestMixin):
@@ -1256,7 +1261,6 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
             reset_tmpdir()
         super(GlobalDBTest, self).tearDown()
 
-
     def backup(self, args=None):
         if args is None:
             args = []
@@ -1339,7 +1343,6 @@ class DBTest(unittest.TestCase, CommonDB):
         reset_server()
         reset_tmpdir()
         super(DBTest, self).tearDown()
-
 
     def alter_db(self):
         conn = self.conn

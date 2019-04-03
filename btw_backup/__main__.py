@@ -88,6 +88,10 @@ class Command(object):
         execfile(general_config_path, self._general_config)
         return self._general_config
 
+    @property
+    def sync_state_path(self):
+        return os.path.join(self.args.config_dir, "sync_state")
+
     def execute(self):
         "Executes the command"
         pass
@@ -233,8 +237,7 @@ class BaseBackupCommand(Command):
         A mixin or base class for all backup commands.
         """
         super(BaseBackupCommand, self).__init__(args)
-        sync_state_path = os.path.join(self.args.config_dir, "sync_state")
-        self.sync_state = SyncState(sync_state_path)
+        self.sync_state = SyncState(self.sync_state_path)
         self.sync_backend = S3Cmd(self.general_config, self.sync_state)
 
     @property

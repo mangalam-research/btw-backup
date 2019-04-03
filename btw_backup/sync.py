@@ -7,7 +7,7 @@ import pyee
 import sys
 import traceback
 
-from .errors import ImproperlyConfigured
+from .errors import ImproperlyConfigured, FatalUserError
 
 def format_exception():
     return "".join(traceback.format_exception(*sys.exc_info()))
@@ -135,8 +135,18 @@ class SyncState(object):
         """
         self._update_state("-sync", path)
 
+    def reset(self):
+        """
+        """
+        if len(self.current_state["sync"]) or len(self.current_state["push"]):
+            raise FatalUserError(
+                "cannot reset: some files must be synced or pushed")
+        self._file.seek(0)
+        self._file.truncate()
+
 
 class S3(object):
+
     def __init__(self, general_config, state):
         self.s3_uri_prefix = general_config.get("S3_URI_PREFIX")
         if self.s3_uri_prefix is None:
@@ -184,7 +194,7 @@ class S3(object):
         for to_push in set(current["push"]):
             try:
                 self._push(to_push)
-            except: # pylint: disable=bare-except
+            except:  # pylint: disable=bare-except
                 stderr = self._stderr
                 print("Error while processing: " + to_push, file=stderr)
                 print(format_exception(), file=stderr)
@@ -192,7 +202,7 @@ class S3(object):
         for to_sync in set(current["sync"]):
             try:
                 self._sync(to_sync)
-            except: # pylint: disable=bare-except
+            except:  # pylint: disable=bare-except
                 stderr = self._stderr
                 print("Error while processing: " + to_sync, file=stderr)
                 print(format_exception(), file=stderr)
@@ -236,6 +246,7 @@ class S3(object):
 
 
 class AWSCliS3(S3):
+
     def __init__(self, general_config, state):
         super(AWSCliS3, self).__init__(general_config, state)
 
@@ -278,6 +289,7 @@ class AWSCliS3(S3):
                               stdout=stdout, stderr=stdout)
 
 class S3Cmd(S3):
+
     def __init__(self, general_config, state):
         super(S3Cmd, self).__init__(general_config, state)
 

@@ -1111,24 +1111,6 @@ class SyncTest(BackupTestMixin, unittest.TestCase):
 
         self.assertNoError(Backup(["sync", "--full"]))
 
-    def test_list(self):
-        # Create some files in dst
-        shutil.copytree(self.src, self.dst_full)
-
-        # Write a fake state.
-        with open(os.path.join(config_dir, "sync_state"), 'w') as state:
-            state.write("""\
-2016-01-01T12:00:00 +push dst/a
-2016-01-01T12:00:00 +push dst/b
-2016-01-01T12:00:00 +sync dst
-""")
-
-        self.assertNoError(Backup(["sync", "--list"]), """\
-Must sync: dst
-Must push: dst/a
-Must push: dst/b\
-""")
-
     def test_default(self):
         # Create some files in dst
         shutil.copytree(self.src, self.dst_full)
@@ -1142,6 +1124,73 @@ Must push: dst/b\
         self.assertNoError(Backup(["sync"]), dont_compare=True)
 
         self.assertTrue(exists_on_server("foo/backups/dst/a"))
+
+
+class SyncStateCommandTest(BackupTestMixin, unittest.TestCase):
+    src = os.path.join(os.getcwd(), "test-data/src")
+
+    def setUp(self):
+        self.dst = "dst"
+        self.dst_full = os.path.join(root_dir, self.dst)
+
+    def tearDown(self):
+        if os.path.exists(self.dst_full):
+            shutil.rmtree(self.dst_full)
+        reset_tmpdir()
+        reset_server()
+        super(SyncStateCommandTest, self).tearDown()
+
+    def test_list(self):
+        # Create some files in dst
+        shutil.copytree(self.src, self.dst_full)
+
+        # Write a fake state.
+        with open(os.path.join(config_dir, "sync_state"), 'w') as state:
+            state.write("""\
+2016-01-01T12:00:00 +push dst/a
+2016-01-01T12:00:00 +push dst/b
+2016-01-01T12:00:00 +sync dst
+""")
+
+        self.assertNoError(Backup(["sync-state", "--list"]), """\
+Must sync: dst
+Must push: dst/a
+Must push: dst/b\
+""")
+
+    def test_reset_fails(self):
+        # Create some files in dst
+        shutil.copytree(self.src, self.dst_full)
+
+        # Write a fake state.
+        with open(os.path.join(config_dir, "sync_state"), 'w') as state:
+            state.write("""\
+2016-01-01T12:00:00 +push dst/a
+2016-01-01T12:00:00 +push dst/b
+2016-01-01T12:00:00 +sync dst
+""")
+
+        self.assertError(Backup(["sync-state", "--reset"]),
+                         "btw_backup: cannot reset: some files "
+                         "must be synced or pushed", 1)
+
+    def test_reset_works(self):
+        # Create some files in dst
+        shutil.copytree(self.src, self.dst_full)
+
+        # Write a fake state.
+        with open(os.path.join(config_dir, "sync_state"), 'w') as state:
+            state.write("""\
+2016-01-01T12:00:00 +push dst/a
+2016-01-01T12:00:00 +push dst/b
+2016-01-01T12:00:00 +sync dst
+2016-01-01T12:00:00 -push dst/a
+2016-01-01T12:00:00 -push dst/b
+2016-01-01T12:00:00 -sync dst
+""")
+
+        self.assertNoError(Backup(["sync-state", "--reset"]),
+                           "The state was reset")
 
 
 class CommonDB(BackupTestMixin):

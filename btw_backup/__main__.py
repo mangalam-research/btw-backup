@@ -303,6 +303,7 @@ class BaseBackupCommand(Command):
 
 
 class Sync(BaseBackupCommand):
+
     def __init__(self, args):
         """
         Sync ROOT_PATH with S3 storage. You would use this if you already
@@ -310,13 +311,26 @@ class Sync(BaseBackupCommand):
         to a new S3 location.
         """
         super(Sync, self).__init__(args)
-        if self.args.full and self.args.list:
-            raise Exception("--full and --list are not allowed together")
-        self.suppress_sync = False
 
-    def sync(self):
-        if not self.suppress_sync:
-            return super(Sync, self).sync()
+    def execute(self):
+        if self.args.full:
+            self.sync_path("")
+
+        # We do not execute self.sync because this is done by default
+        # with all command executions.
+
+class SyncStateCommand(Command):
+
+    def __init__(self, args):
+        """
+        Obtain information or manipulate the sync state.
+        """
+        super(SyncStateCommand, self).__init__(args)
+        if self.args.list and self.args.reset:
+            fatal("--list and --reset are not allowed together")
+        if not (self.args.list or self.args.reset):
+            fatal("must specify --list or --reset")
+        self.sync_state = SyncState(self.sync_state_path)
 
     def execute(self):
         if self.args.list:
@@ -326,12 +340,10 @@ class Sync(BaseBackupCommand):
 
             for path in current_state["push"]:
                 print("Must push: " + path)
-            self.suppress_sync = True
-        elif self.args.full:
-            self.sync_path("")
-
-        # We do not execute self.sync because this is done by default
-        # with all command executions.
+        elif self.args.reset:
+            current_state = self.sync_state.current_state
+            self.sync_state.reset()
+            print("The state was reset")
 
 class RdiffBackupCommand(BaseBackupCommand):
 
@@ -893,7 +905,6 @@ def main():
     db_sp.add_argument('--fake-dumpall', action='store',
                        help=argparse.SUPPRESS)
 
-
     sync_sp = subparsers.add_parser(
         "sync",
         description=Sync.__doc__,
@@ -906,10 +917,23 @@ def main():
                          help="do a full sync of everything in ROOT_PATH to "
                          "S3 storage; the default is to sync only files "
                          "needing syncing")
-    sync_sp.add_argument("--list",
-                         dest="list",
-                         action="store_true",
-                         help="only list the files that need syncing")
+
+    sync_state_sp = subparsers.add_parser(
+        "sync-state",
+        description=SyncStateCommand.__doc__,
+        help="get information about the sync state or manipulate it",
+        formatter_class=argparse.RawTextHelpFormatter)
+    sync_state_sp.set_defaults(class_=SyncStateCommand)
+
+    sync_state_sp.add_argument("--list",
+                               dest="list",
+                               action="store_true",
+                               help="only list the files that need syncing")
+
+    sync_state_sp.add_argument("--reset",
+                               dest="reset",
+                               action="store_true",
+                               help="reset the state, if it is safe to do so")
 
     try:
         try:

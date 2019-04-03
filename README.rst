@@ -9,7 +9,7 @@ Synopsis
 ::
 
     usage: btw-backup [-h] [-q] [--config-dir CONFIG_DIR] [--version]
-                      {fs,fs-init,list,db,sync} ...
+                      {fs,fs-init,list,db,sync,sync-state} ...
 
     optional arguments:
       -h, --help            show this help message and exit
@@ -31,6 +31,14 @@ Synopsis
           whether things need to be synced or forcing a sync
           immediately. Synchronizations happen automatically after a
           backup is run.
+
+.. note:: The ``sync-state`` command is equally unusual. It is meant to verify
+          and manipulate the current sync state.
+
+Requisites
+==========
+
+* ``apt-get install rdiff-backup``
 
 Configuration
 =============
@@ -246,6 +254,23 @@ A: No, there is still a problem. See, ``rdiff-backup`` says it
 
    The script ``misc/script.sh`` illustrates the issue.
 
+Checking and Resetting the Sync State
+=====================================
+
+As mentioned above, ``btw-backup`` records a sync state that can allow it to
+recover from being forcibly interrupted during a sync. Over the years this file
+can grow quite a bit. The ``sync-state`` subcommand allows checking and
+resetting this file.
+
+You can use ``btw-backup sync-state --list`` to list the files that have not
+been synced.
+
+You can use ``btw-backup sync-state --reset`` to reset the state to empty. This
+command will fail if there are any files that have not been synced.
+
+.. warning:: ``sync-state --reset`` is not bullet-proof. Use your judgment as to
+             when to run it.
+
 Security
 ========
 
@@ -262,6 +287,21 @@ controlled, and encrypted. (Don't shove them unencrypted on a public
 ftp site.) By default, ``btw-backup`` invokes ``s3cmd`` with
 ``--server-side-encryption``, which encrypts the data on the S3
 server.
+
+Testing
+=======
+
+* See ``Requisites`` above.
+
+* Create a virtual environment for this purpose.
+
+* Activate the virtual environment.
+
+* ``pip install -e .``
+
+* ``npm install``
+
+* ``python setup.py nosetest``
 
 ..  LocalWords:  btw hoc fs init subcommands py globals config src
 ..  LocalWords:  rdiff pytimeparse UID GID dst tarfile txt dumpall

@@ -21,12 +21,13 @@ setup(
         'pytimeparse>=1.1.4,<=2',
         'pyhash>=0.6.2,<1',
         'pyee>=1.0.2,<2',
-        'awscli>=1.10.21,<2'
+        'awscli>=1.10.21,<2',
+        's3cmd<3',
     ],
-    tests_require = [
+    tests_require=[
         'psycopg2>=2.5.2,<3'
     ],
-    test_suite= 'nose.collector',
+    test_suite='nose.collector',
     setup_requires=['nose>=1.3.0'],
     data_files=[
         ('.', ['LICENSE', 'VERSION'])

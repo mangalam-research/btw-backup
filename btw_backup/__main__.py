@@ -556,7 +556,7 @@ class TarBackupCommand(SourceCommand, BaseBackupCommand):
             time.sleep(0.5)
 
         new_backup_path = os.path.join(dst, new_backup_name)
-        tar_args = ["-C", src, "--exclude-tag-under=NOBACKUP-TAG",
+        tar_args = ["-C", src, "--exclude-tag=NOBACKUP-TAG",
                     "-cpjf", new_backup_path, "."]
         subprocess.check_call(["tar"] + tar_args)
         self.chownif(new_backup_path)

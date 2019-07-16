@@ -20,7 +20,7 @@ setup(
     install_requires=[
         'pytimeparse>=1.1.4,<=2',
         'pyhash>=0.6.2,<1',
-        'pyee>=1.0.2,<2',
+        'pyee>=6,<7',
         'awscli>=1.10.21,<2',
         's3cmd<3',
     ],

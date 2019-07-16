@@ -580,14 +580,14 @@ class SyncStateTest(BaseStateTest):
     def test_emits_on_push_path(self):
         state = SyncState(self.state_path)
         paths = []
-        state.ee.on('push', paths.append)
+        state.ee.on('push', lambda x: paths.append(x))
         state.push_path("a")
         self.assertEqual(paths, ["a"])
 
     def test_emits_on_sync_path(self):
         state = SyncState(self.state_path)
         paths = []
-        state.ee.on('sync', paths.append)
+        state.ee.on('sync', lambda x: paths.append(x))
         state.sync_path("a")
         self.assertEqual(paths, ["a"])
 

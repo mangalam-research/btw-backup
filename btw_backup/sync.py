@@ -28,7 +28,7 @@ class SyncState(object):
         self.path = path
         self._file = open(path, 'ab+')
         fcntl.lockf(self._file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        self._ee = pyee.EventEmitter()
+        self._ee = pyee.BaseEventEmitter()
         self._cached_raw_current_state = None
         self._cached_current_state = None
 

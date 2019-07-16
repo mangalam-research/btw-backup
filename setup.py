@@ -34,8 +34,8 @@ setup(
     ],
     # use_2to3=True,
     classifiers=[
-        "Programming Language :: Python :: 2.7",
-        "Development Status :: 4 - Beta",
+        "Programming Language :: Python :: 3.7",
+        "Development Status :: 5 - Production/Stable",
         "Environment :: Console",
         "Intended Audience :: Developers",
         "Operating System :: POSIX",

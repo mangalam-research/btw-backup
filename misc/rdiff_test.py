@@ -21,7 +21,7 @@ import datetime
 #
 
 tmpdir = tempfile.mkdtemp()
-print tmpdir
+print(tmpdir)
 
 dst_path = os.path.join(tmpdir, "dst")
 os.mkdir(dst_path)
@@ -29,7 +29,7 @@ os.mkdir(dst_path)
 src_path = os.path.join(tmpdir, "src")
 os.mkdir(src_path)
 
-for i in xrange(0, 5):
+for i in range(0, 5):
     outfile = os.path.join(src_path, "x")
     with open(outfile, 'w') as f:
         f.write(str(i))

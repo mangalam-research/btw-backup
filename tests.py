@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 import unittest
 import os
 import tempfile
@@ -12,7 +12,7 @@ import grp
 import sys
 import multiprocessing
 import re
-from cStringIO import StringIO
+from io import StringIO
 
 import btw_backup.__main__ as main
 from btw_backup.sync import SyncState, S3
@@ -69,7 +69,7 @@ def check_aws_profile(profile):
                                          env=backup_env)
 
         # This is crude but it works.
-        failed = (stdout != """\
+        failed = (stdout.decode("utf8") != """\
       Name                    Value             Type    Location
       ----                    -----             ----    --------
    profile                <not set>             None    None
@@ -304,6 +304,7 @@ class BackupTestMixin(object):
 
     def __init__(self, *args, **kwargs):
         self.tmp_src = None
+        self.maxDiff = None
         super(BackupTestMixin, self).__init__(*args, **kwargs)
 
     def tearDown(self):
@@ -314,14 +315,13 @@ class BackupTestMixin(object):
     def assertNoError(self, backup, expected_output="", regexp=False,
                       dont_compare=False):
         backup.join()
-        ret = backup.outstr
-        err = backup.errstr
+        ret = backup.outstr.decode("utf8")
 
-        self.assertEqual(err, "")
+        self.assertEqual(backup.errstr.decode("utf8"), "")
         if not regexp:
             self.assertEqual(ret, expected_output)
         else:
-            self.assertRegexpMatches(ret, expected_output)
+            self.assertRegex(ret, expected_output)
         self.assertEqual(backup.exitcode, 0)
 
         if not dont_compare and \
@@ -333,8 +333,8 @@ class BackupTestMixin(object):
 
     def assertRdiffListOutput(self, backup, expected):
         backup.join()
-        outstr = backup.outstr
-        self.assertEqual(backup.errstr, "")
+        outstr = backup.outstr.decode("utf8")
+        self.assertEqual(backup.errstr.decode("utf8"), "")
 
         lines = outstr.split("\n")
         now = datetime.datetime.utcnow()
@@ -370,8 +370,8 @@ class BackupTestMixin(object):
 
     def assertTarListOutput(self, backup, expected):
         backup.join()
-        outstr = backup.outstr
-        self.assertEqual(backup.errstr, "")
+        outstr = backup.outstr.decode("utf8")
+        self.assertEqual(backup.errstr.decode("utf8"), "")
 
         lines = outstr.split("\n")
         now = datetime.datetime.utcnow()
@@ -401,8 +401,8 @@ class BackupTestMixin(object):
 
     def assertError(self, backup, expected_error, expected_status):
         backup.join()
-        self.assertEqual(backup.errstr, expected_error)
-        self.assertEqual(backup.outstr, "")
+        self.assertEqual(backup.errstr.decode("utf8"), expected_error)
+        self.assertEqual(backup.outstr, b"")
         self.assertEqual(backup.exitcode, expected_status)
 
     def createSrc(self):
@@ -422,7 +422,7 @@ class BackupTestMixin(object):
         backup = Backup(["fs-init", "--type=rdiff", src, name])
         out = self.assertNoError(
             backup,
-            ur"^btw_backup: created /tmp/.*?/test\..*?$",
+            r"^btw_backup: created /tmp/.*?/test\..*?$",
             regexp=True)
         return out[len("btw_backup: created "):]
 
@@ -432,7 +432,7 @@ class BackupTestMixin(object):
     def check_off_site_sync(self):
         diff_against_server(self.dst_full, self.dst)
 
-time_re = re.compile(ur"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}",
+time_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}",
                      re.MULTILINE)
 
 def clean_times(src):
@@ -441,6 +441,7 @@ def clean_times(src):
 class BaseStateTest(unittest.TestCase):
 
     def setUp(self):
+        self.maxDiff = None
         self.state_path = os.path.join(tmpdir, "test_state")
 
     def tearDown(self):
@@ -481,16 +482,16 @@ class SyncStateTest(BaseStateTest):
         state.sync_path("c")
         state.sync_path("d")
         self.assertEqual(state.current_state, {
-            "push": set(("a", "b")),
-            "sync": set(("c", "d"))
+            "push": ["a", "b"],
+            "sync": ["c", "d"],
         })
 
         state.push_done("a")
         state.sync_done("d")
 
         self.assertEqual(state.current_state, {
-            "push": set(("b",)),
-            "sync": set(("c",))
+            "push": ["b"],
+            "sync": ["c"],
         })
 
     def test_saves_to_file(self):
@@ -545,8 +546,8 @@ class SyncStateTest(BaseStateTest):
 """)
         state = SyncState(self.state_path).current_state
         self.assertEqual(state, {
-            "push": set(("a", "b")),
-            "sync": set(("c", "d"))
+            "push": ["a", "b"],
+            "sync": ["c", "d"],
         })
 
         self.storeToState("""\
@@ -560,8 +561,8 @@ class SyncStateTest(BaseStateTest):
 
         state = SyncState(self.state_path).current_state
         self.assertEqual(state, {
-            "push": set(("b",)),
-            "sync": set(("c",))
+            "push": ["b"],
+            "sync": ["c"],
         })
 
         # This simulates a push that happened on the path "", which is
@@ -572,8 +573,8 @@ class SyncStateTest(BaseStateTest):
 
         state = SyncState(self.state_path).current_state
         self.assertEqual(state, {
-            "push": set(),
-            "sync": set(("",))
+            "push": [],
+            "sync": [""],
         })
 
     def test_emits_on_push_path(self):
@@ -612,18 +613,18 @@ class S3Test(BaseStateTest):
 
     def test_raises_if_s3_uri_prefix_missing(self):
         state = SyncState(self.state_path)
-        with self.assertRaisesRegexp(
+        with self.assertRaisesRegex(
                 ImproperlyConfigured,
-                ur"^you must specify S3_URI_PREFIX in the general "
-                ur"configuration$"):
+                r"^you must specify S3_URI_PREFIX in the general "
+                r"configuration$"):
             S3Null({}, state)
 
     def test_raises_if_roo_path_missing(self):
         state = SyncState(self.state_path)
-        with self.assertRaisesRegexp(
+        with self.assertRaisesRegex(
                 ImproperlyConfigured,
-                ur"^you must specify ROOT_PATH in the general "
-                ur"configuration$"):
+                r"^you must specify ROOT_PATH in the general "
+                r"configuration$"):
             S3Null({
                 "S3_URI_PREFIX": "foo"
             }, state)
@@ -634,9 +635,9 @@ class S3Test(BaseStateTest):
             "S3_URI_PREFIX": "s3://foo",
             "ROOT_PATH": root_dir,
         }, state)
-        with self.assertRaisesRegexp(
+        with self.assertRaisesRegex(
                 ValueError,
-                ur"^trying to sync a non-existent path: nonexistent"):
+                r"^trying to sync a non-existent path: nonexistent"):
             state.sync_path("nonexistent")
 
     def test_raises_error_if_syncing_a_non_directory(self):
@@ -649,9 +650,9 @@ class S3Test(BaseStateTest):
         with open(os.path.join(root_dir, "foo"), 'w') as foo:
             pass
 
-        with self.assertRaisesRegexp(
+        with self.assertRaisesRegex(
                 ValueError,
-                ur"^trying to sync a path which is not a directory: foo"):
+                r"^trying to sync a path which is not a directory: foo"):
             state.sync_path("foo")
 
     def test_pushes_and_syncs(self):
@@ -699,17 +700,17 @@ class S3Test(BaseStateTest):
         self.assertEqual(s3._synced, set(("server",)))
 
         # Some failed.
-        self.assertRegexpMatches(
+        self.assertRegex(
             stderr.getvalue(),
-            re.compile(ur"^Error while processing: a$", re.MULTILINE))
-        self.assertRegexpMatches(
+            re.compile(r"^Error while processing: a$", re.MULTILINE))
+        self.assertRegex(
             stderr.getvalue(),
-            re.compile(ur"^Error while processing: $", re.MULTILINE))
+            re.compile(r"^Error while processing: $", re.MULTILINE))
 
         # Those that failed still need to be done.
         self.assertEqual(state.current_state, {
-            "push": set(("a", )),
-            "sync": set(("", ))
+            "push": ["a"],
+            "sync": [""],
         })
 
         # The state on disk does not show the failures as done.
@@ -775,21 +776,24 @@ class FSInitTest(BackupTestMixin, unittest.TestCase):
         self.assertError(
             Backup(["fs-init"]),
             "usage: btw_backup fs-init [-h] --type {rdiff,tar} src name\n"
-            "btw_backup fs-init: error: too few arguments",
+            "btw_backup fs-init: error: the following arguments are "
+            "required: --type, src, name",
             2)
 
     def test_lacking_name(self):
         self.assertError(
             Backup(["fs-init", "."]),
             "usage: btw_backup fs-init [-h] --type {rdiff,tar} src name\n"
-            "btw_backup fs-init: error: too few arguments",
+            "btw_backup fs-init: error: the following arguments are "
+            "required: --type, name",
             2)
 
     def test_lacking_type(self):
         self.assertError(
             Backup(["fs-init", "/", "test"]),
             "usage: btw_backup fs-init [-h] --type {rdiff,tar} src name\n"
-            "btw_backup fs-init: error: argument --type is required",
+            "btw_backup fs-init: error: the following arguments are "
+            "required: --type",
             2)
 
     def test_not_absolute(self):
@@ -800,7 +804,7 @@ class FSInitTest(BackupTestMixin, unittest.TestCase):
     def test_new_setup(self):
         out = self.assertNoError(
             Backup(["fs-init", "--type=rdiff", self.src, "test"]),
-            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
+            r"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
 
         workdir_path = out[len("btw_backup: created "):]
@@ -812,7 +816,7 @@ class FSInitTest(BackupTestMixin, unittest.TestCase):
     def test_duplicate_setup(self):
         out = self.assertNoError(
             Backup(["fs-init", "--type=rdiff", self.src, "test"]),
-            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
+            r"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
         workdir_path = out[len("btw_backup: created "):]
 
@@ -833,7 +837,7 @@ class FSRdiffTest(BackupTestMixin, unittest.TestCase):
 
         self.assertNoError(
             Backup(["fs-init", "--type=rdiff", self.src, "test"]),
-            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
+            r"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
 
     def tearDown(self):
@@ -855,14 +859,15 @@ class FSRdiffTest(BackupTestMixin, unittest.TestCase):
         self.assertError(
             Backup(["fs"]),
             "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw_backup fs: error: too few arguments",
+            "btw_backup fs: error: the following arguments are required: src, "
+            "dst",
             2)
 
     def test_no_dst(self):
         self.assertError(
             Backup(["fs", self.src]),
             "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw_backup fs: error: too few arguments",
+            "btw_backup fs: error: the following arguments are required: dst",
             2)
 
     def test_new_backup(self):
@@ -955,9 +960,9 @@ class FSRdiffTest(BackupTestMixin, unittest.TestCase):
         self.assertRdiffListOutput(Backup(["list", self.dst]), "f")
 
         # Check the log
-        self.assertRegexpMatches(
+        self.assertRegex(
             open(os.path.join(self.dst_full, "log.txt"), 'r').read(),
-            ur"^.*: no change in the data to be backed up: "
+            r"^.*: no change in the data to be backed up: "
             "skipping creation of new full backup\n$")
 
 
@@ -971,7 +976,7 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
 
         self.assertNoError(
             Backup(["fs-init", "--type=tar", self.src, "test"]),
-            ur"^btw_backup: created /tmp/.*?/test.uqsE0Q",
+            r"^btw_backup: created /tmp/.*?/test.uqsE0Q",
             regexp=True)
 
     def tearDown(self):
@@ -985,7 +990,7 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
         backup = Backup(["fs-init", "--type=tar", src, name])
         out = self.assertNoError(
             backup,
-            ur"^btw_backup: created /tmp/.*?/test\..*?$",
+            r"^btw_backup: created /tmp/.*?/test\..*?$",
             regexp=True)
         return out[len("btw_backup: created "):]
 
@@ -1001,14 +1006,15 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
         self.assertError(
             Backup(["fs"]),
             "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw_backup fs: error: too few arguments",
+            "btw_backup fs: error: the following arguments are required: src, "
+            "dst",
             2)
 
     def test_no_dst(self):
         self.assertError(
             Backup(["fs", self.src]),
             "usage: btw_backup fs [-h] [-u UID[:GID]] src dst\n"
-            "btw_backup fs: error: too few arguments",
+            "btw_backup fs: error: the following arguments are required: dst",
             2)
 
     def test_new_backup(self):
@@ -1038,9 +1044,9 @@ class FSTarTest(BackupTestMixin, unittest.TestCase):
         self.assertTarListOutput(Backup(["list", self.dst]), 1)
 
         # Check the log
-        self.assertRegexpMatches(
+        self.assertRegex(
             open(os.path.join(self.dst_full, "log.txt"), 'r').read(),
-            ur"^.*: no change in the data to be backed up: "
+            r"^.*: no change in the data to be backed up: "
             "dropping backup\n$")
 
 class ListTest(BackupTestMixin, unittest.TestCase):
@@ -1331,7 +1337,7 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
         self.assertError(
             Backup(["db"]),
             "usage: btw_backup db [-h] [-g] [-u UID[:GID]] [db] dst\n"
-            "btw_backup db: error: too few arguments",
+            "btw_backup db: error: the following arguments are required: dst",
             2)
 
     def test_no_database(self):
@@ -1351,7 +1357,7 @@ class GlobalDBTest(unittest.TestCase, CommonDB):
         last_backup = os.path.join(self.dst_full, last, "global.sql.bz2")
         contents = None
         with bz2.BZ2File(last_backup, 'r') as f:
-            contents = f.read()
+            contents = f.read().decode("utf8")
 
         self.assertEqual(contents, self.previous_contents)
 

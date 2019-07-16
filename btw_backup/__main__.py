@@ -29,7 +29,7 @@ fs_backup_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 prog = None
 dumpall_cmd = ["pg_dumpall", "-g"]
 
-os.umask(0077)
+os.umask(0o077)
 
 class Exit(Exception):
 
@@ -58,8 +58,9 @@ def int_as_bytearray(i):
 
 hasher = murmur3_32()
 def get_hash(src):
-    return base64.urlsafe_b64encode(int_as_bytearray(hasher(src))) \
-                 .rstrip("=")
+    return base64 \
+        .urlsafe_b64encode(int_as_bytearray(hasher(src.encode("utf8")))) \
+        .decode("utf8").rstrip("=")
 
 def get_src_path(working_dir):
     return os.path.join(working_dir, "src")
@@ -85,7 +86,8 @@ class Command(object):
         general_config_path = os.path.join(self.args.config_dir,
                                            "config.py")
         self._general_config = {}
-        execfile(general_config_path, self._general_config)
+        exec(compile(open(general_config_path).read(),
+                     general_config_path, 'exec'), self._general_config)
         return self._general_config
 
     @property
@@ -165,7 +167,8 @@ class SourceCommand(Command):
 
         wd = self.working_dir
         conf = {}
-        execfile(os.path.join(wd, "config.py"), conf)
+        exec(compile(open(os.path.join(wd, "config.py")).read(),
+                     os.path.join(wd, "config.py"), 'exec'), conf)
 
         self._config = conf
         return conf
@@ -644,7 +647,7 @@ def get_incrementals_for(fullpath, include_full=False):
     """
     out = subprocess.check_output(
         ["rdiff-backup", "-l", "--parsable-output", fullpath])
-    incrementals = out.split("\n")
+    incrementals = out.decode("utf8").split("\n")
 
     if not include_full:
         # The first incremental in the list corresponds to the full
@@ -724,7 +727,7 @@ class DBBackup(RdiffBackupCommand):
             "MAX_INCREMENTAL_SPAN": "24h"
         }
         if os.path.exists(config_path):
-            execfile(config_path, conf)
+            exec(compile(open(config_path).read(), config_path, 'exec'), conf)
 
         self._config = conf
         return conf
@@ -828,7 +831,7 @@ def main():
     global prog  # pylint: disable=global-statement
     # This happens if we use "python -m", for instance, not very useful.
     if sys.argv[0].endswith(os.path.join("btw_backup", "__main__.py")):
-        sys.argv[0] = __loader__.fullname.split(".")[0]
+        sys.argv[0] = __loader__.name.split(".")[0]
 
     prog = sys.argv[0]
 

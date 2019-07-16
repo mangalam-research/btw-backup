@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 import subprocess
 import os
 import fcntl
@@ -29,7 +29,8 @@ class SyncState(object):
         self._file = open(path, 'ab+')
         fcntl.lockf(self._file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         self._ee = pyee.EventEmitter()
-        self._current_state = None
+        self._cached_raw_current_state = None
+        self._cached_current_state = None
 
     @property
     def ee(self):
@@ -43,33 +44,40 @@ class SyncState(object):
         return self._ee
 
     @property
-    def current_state(self):
-        """
-        The current state. This is a dictionary whose keys are the types
-        of operations supported (push and sync). The values associated
-        with those keys are the set of paths that still need having
-        their respective operations performed on them. **You may not
-        modify the value you get here.**
-        """
-        if self._current_state is not None:
-            return self._current_state
+    def _raw_current_state(self):
+        if self._cached_raw_current_state is not None:
+            return self._cached_raw_current_state
 
-        # Setting _current_state here ensures that even if self._update_state
-        # tries to access self.current_state, it won't read the file
-        # again.
-        self._current_state = {
-            "push": set(),
-            "sync": set()
+        # Setting _cached_raw_current_state here ensures that even if
+        # self._update_state tries to access self.current_state, it won't read
+        # the file again.
+        self._cached_raw_current_state = {
+            # In theory, what we want here is a set() but sets do not maintain
+            # order. dict() does maintain order so we use dicts whose values are
+            # not important.
+            "push": dict(),
+            "sync": dict()
         }
 
         self._file.seek(0)
         for line in self._file:
-            line = line.rstrip("\r\n")
+            line = line.decode("utf8").rstrip("\r\n")
             (_, op, path) = line.split(" ", 2)
             self._update_state(op, path, reading=True)
         self._file.seek(0, os.SEEK_END)
 
-        return self._current_state
+        return self._cached_raw_current_state
+
+    @property
+    def current_state(self):
+        """
+        The current state. This is a dictionary whose keys are the types
+        of operations supported (push and sync). The values associated
+        with those keys are the lists of paths that still need having
+        their respective operations performed on them.
+        """
+        # We just convert the dict keys to lists.
+        return {k: list(v.keys()) for k, v in self._raw_current_state.items()}
 
     def _update_state(self, op, path, reading=False):
         op_prefix = op[0]
@@ -81,13 +89,13 @@ class SyncState(object):
         if op_prefix == "+":
             self._ee.emit(op_suffix, path)
 
-        # We do not access _current_state directly because this
+        # We do not access _cached_raw_current_state directly because this
         # method may be called first from push* and sync* methods.
-        target = self.current_state[op_suffix]
+        target = self._raw_current_state[op_suffix]
         if op_prefix == "+":
-            target.add(path)
+            target[path] = 1
         elif op_prefix == "-":
-            target.remove(path)
+            del target[path]
         else:
             raise ValueError("invalid op: " + op)
 
@@ -95,7 +103,8 @@ class SyncState(object):
         if not reading:
             ss_file = self._file
             now = datetime.datetime.utcnow().replace(microsecond=0)
-            ss_file.write("{0} {1} {2}\n".format(now.isoformat(), op, path))
+            ss_file.write("{0} {1} {2}\n".format(now.isoformat(), op, path)
+                          .encode("utf8"))
             ss_file.flush()
             os.fsync(ss_file.fileno())
 
@@ -191,7 +200,7 @@ class S3(object):
         # an error message and keep the path whose operation failed
         # among those paths that need operating on.
         #
-        for to_push in set(current["push"]):
+        for to_push in current["push"]:
             try:
                 self._push(to_push)
             except:  # pylint: disable=bare-except
@@ -199,7 +208,7 @@ class S3(object):
                 print("Error while processing: " + to_push, file=stderr)
                 print(format_exception(), file=stderr)
 
-        for to_sync in set(current["sync"]):
+        for to_sync in current["sync"]:
             try:
                 self._sync(to_sync)
             except:  # pylint: disable=bare-except

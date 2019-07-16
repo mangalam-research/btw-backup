@@ -301,7 +301,7 @@ Testing
 
 * ``npm install``
 
-* ``python setup.py nosetest``
+* ``python setup.py nosetests``
 
 ..  LocalWords:  btw hoc fs init subcommands py globals config src
 ..  LocalWords:  rdiff pytimeparse UID GID dst tarfile txt dumpall

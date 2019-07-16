@@ -18,10 +18,10 @@ setup(
     keywords=["backup"],
     url="https://github.com/mangalam-research/btw-backup",
     install_requires=[
-        'pytimeparse>=1.1.4,<=2',
-        'pyhash>=0.6.2,<1',
+        'pytimeparse>=1.1.8,<=2',
+        'pyhash>=0.9.3,<1',
         'pyee>=6,<7',
-        'awscli>=1.10.21,<2',
+        'awscli>=1.16.198,<2',
         's3cmd<3',
     ],
     tests_require=[

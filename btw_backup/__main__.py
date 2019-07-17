@@ -23,7 +23,7 @@ from .errors import FatalUserError
 
 dirname = os.path.dirname(__file__)
 
-__version__ = open(os.path.join(dirname, '..', 'VERSION')).read().strip()
+__version__ = open(os.path.join(dirname, 'VERSION')).read().strip()
 
 fs_backup_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 prog = None

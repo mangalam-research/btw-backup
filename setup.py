@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-version = open('VERSION').read().strip()
+version = open('btw_backup/VERSION').read().strip()
 
 setup(
     name="btw-backup",
@@ -29,9 +29,7 @@ setup(
     ],
     test_suite='nose.collector',
     setup_requires=['nose>=1.3.0'],
-    data_files=[
-        ('.', ['LICENSE', 'VERSION'])
-    ],
+    include_package_data=True,
     # use_2to3=True,
     classifiers=[
         "Programming Language :: Python :: 3.7",
